@@ -7,7 +7,7 @@ _logger = logging.getLogger(__name__)
 
 class VhdlEnum(int, Enum):
     def __str__(self):
-        return self.name.replace("-", " ")
+        return self.name.replace("_", " ")
 
     def __repr__(self):
         return self.name
