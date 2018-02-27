@@ -127,6 +127,10 @@ class Distribution:
         return self.header['lowest_value']
 
     @property
+    def highest_value(self):
+        return self.lowest_value + self.bin_width * (self.last_bin - 1)
+
+    @property
     def total(self):
         return self.header['total']
 
