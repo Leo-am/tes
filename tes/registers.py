@@ -1,5 +1,5 @@
-from tes.base import VhdlEnum
-from tes.maps import (
+from .base import VhdlEnum
+from .maps import (
     _Transport,  _map_str, _to_onehot, mca_map, adc_map, channel_map,
     baseline_map, event_map, global_map, cfd_map
 )
