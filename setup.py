@@ -11,5 +11,8 @@ setup(
     url='http://www.quantum.info',
     author_email='geoff.gillett@gmail.com',
     # package_dir={'tes': ''},
-    py_modules=['tes.base', 'tes.maps', 'tes.mca', 'tes.registers']
+    py_modules=[
+        'tes.base', 'tes.maps', 'tes.mca', 'tes.registers', 'tes.analysis'
+    ],
+    requires=['matplotlib', 'numpy', 'scipy', 'numba']
 )
