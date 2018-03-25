@@ -68,7 +68,7 @@ def guess_thresholds(data, bins=16000, win_length=200, max_thresh=10):
     max_i = maxima(f)  # indices of the maxima
     m = [0.0] + list(bin_c[max_i])
     t = [m[i - 1] + (m[i] - m[i - 1]) / 2 for i in range(2, len(m))]
-    thresholds = np.array([0.0] + t + [m[-1] + (m[-1] - t[-1])])
+    thresholds = np.array([0.0] + t + [m[-1] + (m[-1] - t[-1])*1.10])
 
     return Guess(hist, f, bin_c, max_i, thresholds)
 
@@ -252,7 +252,7 @@ class MixtureModel(
 @jit
 def expectation_maximisation(
     data, thresh, zero_loc=None, dist=stats.gamma, tol=1, max_iter=30,
-    verbose=True
+    verbose=True, normalise=False
 ):
     """
     Fit a mixture of distributions to data.
@@ -266,6 +266,8 @@ def expectation_maximisation(
     :param float tol: termination tolerance for change in log_likelihood.
     :param int max_iter: max iterations of expectation maximisation to use.
     :param bool verbose: print progress during optimisation.
+    :param bool normalise: passed to maximise step, thresholds are calculated
+           using the intersection of the normalised distributions.
 
     :return: (param_list, zero_loc, log_likelihood, converged) as a named tuple.
             Where param_list is a list of parameter values for distribution in
@@ -290,7 +292,7 @@ def expectation_maximisation(
     if verbose:
         print('Maximisation step:{}'.format(i))
     new_thresh = np.array(
-        maximisation_step(param_list, dist=dist)
+        maximisation_step(param_list, dist=dist, normalise=normalise)
     )
     ll = mixture_model_ll(data, param_list, dist=dist)
     if verbose:
@@ -309,7 +311,7 @@ def expectation_maximisation(
         if verbose:
             print('Maximisation step:{}'.format(i))
         new_thresh = np.array(
-            maximisation_step(new_param_list, dist=dist)
+            maximisation_step(new_param_list, dist=dist, normalise=normalise)
         )
         new_ll = mixture_model_ll(data, new_param_list, dist=dist)
         if verbose:
@@ -426,64 +428,78 @@ def plot_mixture_model(
     if data is None and x is None:
         raise AttributeError('Either data or x must be supplied')
 
-    if not isinstance(bins, int):
-        bins = max(1000, bins[-1])
-    else:
-        bins = max(1000, bins)
-
     if figsize is None:
         fig = plt.figure()
     else:
         fig = plt.figure(figsize=figsize)
 
-    ax = fig.add_axes([0.12, 0.12, 0.87, 0.87])
+    ax = fig.add_axes([0.12, 0.12, 0.87, 0.84])
     if data is not None:
         hist, edges = np.histogram(data, bins=bins)
         w = edges[1] - edges[0]
         c = edges[:-1] + w / 2
-        x = np.linspace(edges[0], edges[-1], bins)
+        # x = np.linspace(edges[0], edges[-1], bins)
         max_p = max(hist)
-        ax.plot(
-            c[hist.nonzero()[0]],
-            hist[hist.nonzero()[0]],
-            's', color='darkgray', markerfacecolor='none', mew=0.5,
-            markersize=3, label='bin count'
-        )
+        s = sum(hist) * w
+        if not normalised:
+            ax.plot(
+                c[hist.nonzero()[0]],
+                hist[hist.nonzero()[0]],
+                's', color='darkgray', markerfacecolor='none', mew=0.5,
+                markersize=3, label='bin count'
+            )
+        else:
+            s = 1
     else:
         c = x
+        s = 1
 
-    pdfs = np.zeros((len(model.param_list), len(c)))
+    pdfs = np.zeros((len(model.param_list), len(c)), np.float64)
 
     for i in range(len(model.param_list)):
         if normalised:
             pdfs[i, :] = normalised_pdf(c, model.param_list[i])
         else:
-            pdfs[i, :] = scaled_pdf(c, model.param_list[i])
+            pdfs[i, :] = scaled_pdf(c, model.param_list[i])*s
 
         if i == 0:
-            ax.plot(x, pdfs[i, :] * sum(hist) * w, lw=2, label='noise')
+            ax.plot(c, pdfs[i, :], lw=2, label='noise')
+        elif i != 1:
+            ax.plot(c, pdfs[i, :], lw=2, label='{} photons'.format(i))
         else:
-            ax.plot(
-                x, pdfs[i, :] * sum(hist) * w, lw=2,
-                label='{} Photon'.format(i)
-            )
+            ax.plot(c, pdfs[i, :], lw=2, label='{} photon'.format(i))
+
+    if data is None or normalised:
+        max_p = np.max(pdfs[1:])
+        ax.set_xlim([-10, max(data)])
 
     if data is None:
-        max_p = max(max(pdfs))
+        ax.set_xlim([-10, max(x)])
+    else:
+        ax.set_xlim([-10, max(data)])
 
-    ax.plot(x, np.sum(pdfs, 0) * sum(hist) * w, 'k', lw=0.5, label='model')
+    ax.set_ylim([0, max_p*1.1])
+
+    ax.plot(c, np.sum(pdfs, 0), 'k', lw=0.5, label='model')
 
     if not normalised:
-        thresh = maximisation_step(model.param_list,False, dist=model.dist)
+        thresh = maximisation_step(
+            model.param_list, normalise=False, dist=model.dist
+        )
     else:
         thresh = model.thresholds
+
     for t in thresh:
         ax.plot([t, t], [0, max_p], ':k', lw=1)
 
     ax.set_xlabel('area')
-    ax.set_ylabel('count')
+    if normalised:
+        ax.set_ylabel('probability')
+    else:
+        ax.set_ylabel('count')
     fig.legend()
     return fig
+
 
 """
 timing analysis
@@ -548,17 +564,18 @@ def drive_correlation(abs_time, mask, data, thresholds, r, verbose=False):
     :return: list of ndarrays representing the cross correlation.
 
     :note: abs_time[mask] and data must be the same length.
+           TODO speed up the algorithm.
     """
 
     xc = []
     for t in range(len(thresholds)):
         if verbose:
             if t == 0:
-                print('Noise partition')
+                print('Cross correlating Noise partition')
             elif t == len(thresholds)-1:
-                print('{}+ photon partition', t)
+                print('Cross correlating {}+ photon partition'.format(t))
             else:
-                print('{} photon partition', t)
+                print('Cross correlating {} photon partition'.format(t))
 
         if t == len(thresholds)-1:
             xc.append(
@@ -573,9 +590,83 @@ def drive_correlation(abs_time, mask, data, thresholds, r, verbose=False):
                 x_correlation(
                     abs_time[not_l(mask)],
                     abs_time[mask]
-                    [and_b(data > thresholds[t], data < thresholds[t + 1])],
+                    [and_b(data > thresholds[t], data <= thresholds[t + 1])],
                     r
                 )
             )
 
     return xc
+
+
+@jit
+def window(i, abs_time, low, high):
+    """
+    get offsets from the current index i in abs_time that are in the relative
+    time window defined by low and high.
+
+    :param int i: current abs_time index.
+    :param ndarray abs_time: absolute times.
+    :param low: low end of relative window.
+    :param high: high end of relative window.
+    :return: (low_o, high_o) coincident times are abs_time[low_o:i+high_o]
+    """
+
+    length = len(abs_time)
+    low_o = 0  # low index offset
+    high_o = 0  # high index offset
+    now = abs_time[i]
+    low_t = now + low
+    high_t = now + high
+
+    if low_t < now:
+        while (i + low_o >= 0) and abs_time[i + low_o] >= low_t: low_o -= 1;
+    else:
+        while (low_o + i < length) and abs_time[i + low_o] < low_t: low_o += 1;
+
+    if high_t < now:
+        while (i + high_o >= 0) and abs_time[i + high_o] > high_t: high_o -= 1;
+    else:
+        while (high_o + i < length) and abs_time[i + high_o] <= high_t: high_o += 1;
+    return low_o, high_o  # offset indexs marking abs_times in the window
+
+
+def coincidence(abs_time, mask, low, high):
+    """
+    Find coincidences between two channels and return indices allowing the
+    correlated events to be found.
+
+    :param ndarray abs_time: absolute times.
+    :param ndarray mask: ndarray of bool that identifies the channels in
+                         abs_time. For abs_times where mask is False, time t is
+                         coincident if abs_time+low <= t <= abs_time+high. If
+                         the mask is True t is coincident if
+                         abs_time-high <= t <= abs_time-low.
+    :param float low: the low side of the coincidence window.
+    :param float high:  the high side of the coincidence whindw.
+    :return: (coinc, coinc_mask) where coinc is a ndarray of indices of the
+             coincident event in the other channel. When more than one event is
+             found in the window the negated value of the first index is
+             entered.
+             coinc_mask is a ndarray of bool indicating where exactly one
+             event was found in the window.
+    """
+    coinc = np.zeros(len(abs_time), np.int32)
+    coinc_mask = np.zeros(len(abs_time), np.bool)
+    for t in range(len(abs_time)):
+        if t % 10000000 == 0:
+            print(t)
+        if not mask[t]:
+            low_o, high_o = window(t, abs_time, low, high)
+            o = low_o
+        else:
+            low_o, high_o = window(t, abs_time, -high, -low)
+            o = high_o
+        coinc_length = high_o - low_o
+        if high_o and low_o:
+            if coinc_length == 1:
+                coinc[t] = t + o
+                coinc_mask[t] = True
+            elif coinc_length > 1:
+                coinc[t] = -(t + o)
+                coinc_mask[t] = False
+    return coinc, coinc_mask
