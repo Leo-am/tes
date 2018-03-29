@@ -65,7 +65,7 @@ def guess_thresholds(data, bins=16000, win_length=200, max_thresh=10):
     win = signal.hann(win_length)
     f = signal.convolve(hist, win, mode='same') / sum(win)
 
-    max_i = maxima(f)  # indices of the maxima
+    max_i = maxima(f, thresh=max_thresh)  # indices of the maxima
     m = [0.0] + list(bin_c[max_i])
     t = [m[i - 1] + (m[i] - m[i - 1]) / 2 for i in range(2, len(m))]
     thresholds = np.array([0.0] + t + [m[-1] + (m[-1] - t[-1])*1.10])
@@ -198,7 +198,7 @@ class MixtureModel(
     Subclass of namedtuple used to represent a mixture model.
 
     fields:
-        :param_list: list of parameters for the distributions in the mixture.
+        :param_list: list of parameters for each distribution in the mixture.
         :thresholds: the intersection of neighbouring distributions in the
                      mixture.
         :zero_loc: Fixed location parameter used to fit the first distribution,
@@ -211,6 +211,7 @@ class MixtureModel(
                (see scipy.stats).
 
     """
+
     __slots__ = ()
 
     def save(self, filename):
@@ -247,6 +248,70 @@ class MixtureModel(
             d['converged'],
             getattr(stats, str(d['dist']))
         )
+
+    def _eval(self, x, d=None, func='pdf'):
+        """
+        evaluate the function of the distribution(s) selected by d at x.
+
+        :param x: value(s) where to the function is evaluated.
+        :param d: selects element(s) of param_list that parameterise the
+                  distributions. If None all distributions in param_list are
+                  used.
+        :param str func: the name of the distribution  function to evaluate
+                             (see scipy.stats.rv_continuous)
+        :return: ndarray shape (len(d), len(x)) containing the pdf(s) or a
+                 single value if only 1 point in 1 pdf is selected.
+        """
+
+        if d is None:
+            p_list = self.param_list
+        else:
+            p_list = self.param_list[d]
+
+        try:
+            xl = len(x)
+        except TypeError:
+            xl = 1
+
+        f = getattr(self.dist, func)
+
+        # print(p_list.shape)
+        if p_list.shape[0] == 1 or len(p_list.shape) == 1:
+            return f(x, *p_list[:-1])
+        else:
+            f_evals = np.zeros((len(p_list), xl))
+            i = 0
+            for p in p_list:
+                f_evals[i, :] = f(x, *p[:-1])
+                i += 1
+
+            return f_evals
+
+    def pdf(self, x, d=None):
+        """
+        evaluate the pdf(s) of the distribution(s) selected by d at x.
+
+        :param x: value(s) where to the function is evaluated.
+        :param d: selects element(s) of param_list that parameterise the
+                  distributions. If None all distributions in param_list are
+                  used.
+        :return: ndarray shape (len(d), len(x)) containing the pdf(s) or a
+                 single value if only 1 point in 1 distribution is selected.
+        """
+        return self._eval(x, d, func='pdf')
+
+    def cdf(self, x, d=None):
+        """
+        evaluate the pdf(s) of the distribution(s) selected by d at x.
+
+        :param x: value(s) where to the function is evaluated.
+        :param d: selects element(s) of param_list that parameterise the
+                  distributions. If None all distributions in param_list are
+                  used.
+        :return: ndarray shape (len(d), len(x)) containing the pdf(s) or a
+                 single value if only 1 point in 1 distribution is selected.
+        """
+        return self._eval(x, d, func='cdf')
 
 
 @jit
@@ -650,6 +715,7 @@ def coincidence(abs_time, mask, low, high):
              coinc_mask is a ndarray of bool indicating where exactly one
              event was found in the window.
     """
+
     coinc = np.zeros(len(abs_time), np.int32)
     coinc_mask = np.zeros(len(abs_time), np.bool)
     for t in range(len(abs_time)):
