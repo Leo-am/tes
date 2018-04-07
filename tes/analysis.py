@@ -162,36 +162,6 @@ def scaled_pdf(x, params, dist=stats.gamma):
     return params[-1]*dist.pdf(x, *params[:-1])
 
 
-# FIXME this is actually the expectation step
-def maximisation_step(param_list, normalise=False, dist=stats.gamma):
-    """
-    Calculate the thresholds for a mixture model that define the data
-    partitions.
-
-    :param list param_list: list of parameters for the distributions in the
-           mixture model, returned by expectation_maximisation().
-    :param bool normalise: calculate thresholds based on a mixture of
-           normalised pdf's.
-    :param dist: type of distribution
-    :return: ndarray of threshold values.
-    """
-    t = [0]
-    for m in range(1, len(param_list)):
-        left = param_list[m - 1]
-        right = param_list[m]
-
-        if normalise:
-            pdf = normalised_pdf
-        else:
-            pdf = scaled_pdf
-
-        def f(x):
-            return pdf(x, left, dist) - pdf(x, right, dist)
-
-        t.append(brentq(f, dist.median(*left[:-1]), dist.median(*right[:-1])))
-    return np.array(t)
-
-
 class MixtureModel(
     namedtuple(
         'MixtureModel', 'param_list thresholds zero_loc log_likelihood '
@@ -253,7 +223,7 @@ class MixtureModel(
             getattr(stats, str(d['dist']))
         )
 
-    def _eval(self, x, d=None, func='pdf'):
+    def _eval(self, x, d=None, scale=False, func='pdf'):
         """
         evaluate the function of the distribution(s) selected by d at x.
 
@@ -261,14 +231,19 @@ class MixtureModel(
         :param d: selects element(s) of param_list that parameterise the
                   distributions. If None all distributions in param_list are
                   used.
-        :param str func: the name of the distribution  function to evaluate
+        :param bool scale: when true return the scaled pdf, the scale is always
+                           param[-1].
+        :param str func: the name of the distribution function to evaluate
                              (see scipy.stats.rv_continuous)
         :return: ndarray shape (len(d), len(x)) containing the pdf(s) or a
                  single value if only 1 point in 1 pdf is selected.
         """
 
         if d is None:
+            # if vaccum:
             p_list = self.param_list
+            # else:
+            # p_list = self.param_list[1:]
         else:
             p_list = self.param_list[d]
 
@@ -281,17 +256,22 @@ class MixtureModel(
 
         # print(p_list.shape)
         if p_list.shape[0] == 1 or len(p_list.shape) == 1:
-            return f(x, *p_list[:-1])
+            if scale:
+                return f(x, *p_list[:-1])*p_list[-1]
+            else:
+                return f(x, *p_list[:-1])
         else:
             f_evals = np.zeros((len(p_list), xl))
             i = 0
             for p in p_list:
-                f_evals[i, :] = f(x, *p[:-1])
+                if scale:
+                    f_evals[i, :] = f(x, *p[:-1])*p[-1]
+                else:
+                    f_evals[i, :] = f(x, *p[:-1])
                 i += 1
-
             return f_evals
 
-    def pdf(self, x, d=None):
+    def pdf(self, x, d=None, scale=False):
         """
         evaluate the pdf(s) of the distribution(s) selected by d at x.
 
@@ -299,12 +279,14 @@ class MixtureModel(
         :param d: selects element(s) of param_list that parameterise the
                   distributions. If None all distributions in param_list are
                   used.
+        :param bool scale: when true return the scaled pdf, the scale is always
+                           param[-1].
         :return: ndarray shape (len(d), len(x)) containing the pdf(s) or a
                  single value if only 1 point in 1 distribution is selected.
         """
-        return self._eval(x, d, func='pdf')
+        return self._eval(x, d, scale=scale, func='pdf')
 
-    def cdf(self, x, d=None):
+    def cdf(self, x, d=None, scale=False):
         """
         evaluate the pdf(s) of the distribution(s) selected by d at x.
 
@@ -312,16 +294,18 @@ class MixtureModel(
         :param d: selects element(s) of param_list that parameterise the
                   distributions. If None all distributions in param_list are
                   used.
+        :param bool scale: when true return the scaled pdf, the scale is always
+                           param[-1].
         :return: ndarray shape (len(d), len(x)) containing the pdf(s) or a
                  single value if only 1 point in 1 distribution is selected.
         """
-        return self._eval(x, d, func='cdf')
+        return self._eval(x, d, scale=scale, func='cdf')
 
 
 @jit
 def expectation_maximisation(
-    data, initial_thresholds, zero_loc=None, dist=stats.gamma, tol=1,
-    max_iter=30, verbose=True, normalise=False
+    data, initial_thresholds, zero_loc=None, dist=stats.gamma,
+    tol=1, max_iter=30, verbose=True, normalise=False
 ):
     """
     Fit a mixture of distributions to data.
@@ -348,7 +332,8 @@ def expectation_maximisation(
            responsibilities.
 
     """
-
+    # trim data
+    data = data[data > initial_thresholds[0]]
     last_threshold = initial_thresholds[-1]
     data = data[data <= last_threshold]
     initial_thresholds = initial_thresholds[:-1]
@@ -359,15 +344,15 @@ def expectation_maximisation(
             'Starting expectation maximisation, {} {} distributions'
             .format(len(initial_thresholds), dist.name)
         )
-    if verbose:
-        print('Expectation step:{}'.format(i))
-    param_list = expectation_step(
+        print('Iteration:{} maximisation'.format(i))
+
+    param_list = hard_maximisation(
         data, initial_thresholds, zero_loc=zero_loc, dist=dist
     )
     if verbose:
-        print('Maximisation step:{}'.format(i))
+        print('Iteration:{} expectation '.format(i))
     new_thresh = np.array(
-        maximisation_step(param_list, dist=dist, normalise=normalise)
+        hard_expectation(param_list, dist=dist, normalise=normalise)
     )
     ll = mixture_model_ll(data, param_list, dist=dist)
     if verbose:
@@ -379,18 +364,20 @@ def expectation_maximisation(
     while i < max_iter:
         i += 1
         if verbose:
-            print('Expectation step:{}'.format(i))
-        new_param_list = expectation_step(
+            print('Iteration:{} maximisation'.format(i))
+        new_param_list = hard_maximisation(
             data, initial_thresholds, zero_loc=zero_loc, dist=dist
         )
         if verbose:
-            print('Maximisation step:{}'.format(i))
+            print('Iteration:{} expectation '.format(i))
         new_thresh = np.array(
-            maximisation_step(new_param_list, dist=dist, normalise=normalise)
+            hard_expectation(new_param_list, dist=dist, normalise=normalise)
         )
         new_ll = mixture_model_ll(data, new_param_list, dist=dist)
         if verbose:
-            print('Threshold changes:{!r}'.format(initial_thresholds - new_thresh))
+            print(
+                'Threshold changes:{!r}'.format(initial_thresholds - new_thresh)
+            )
             print('log likelihood:{} change:{}'.format(new_ll, ll-new_ll))
 
         # terminate if tol met or ll goes down. FIXME is this appropriate?
@@ -411,33 +398,45 @@ def expectation_maximisation(
         else:
             print('Maximum iterations reached')
     thresholds = list(
-        maximisation_step(param_list, normalise=True, dist=dist)
+        hard_expectation(param_list, normalise=True, dist=dist)
     ) + [last_threshold]
 
     return MixtureModel(
-        param_list, np.array(thresholds), zero_loc, ll, converged, dist
+        np.array(param_list), np.array(thresholds), zero_loc, ll, converged,
+        dist
     )
 
 
-def mixture_model_ll(data, param_list, dist=stats.gamma):
+def hard_expectation(param_list, normalise=False, dist=stats.gamma):
     """
-    Calculate the log likelihood of a mixture model.
+    Calculate the thresholds for a mixture model that define the data
+    partitions.
 
-    :param ndarray data: the data used to construct the model.
-    :param param_list: list of parameters for each distribution in the model.
-    :param dist: the type of distribution to use (see scipy.stats).
-    :return: the log likelihood.
+    :param list param_list: list of parameters for the distributions in the
+           mixture model, returned by expectation_maximisation().
+    :param bool normalise: calculate thresholds based on a mixture of
+           normalised pdf's.
+    :param dist: type of distribution
+    :return: ndarray of threshold values.
     """
+    t = [0]
+    for m in range(1, len(param_list)):
+        left = param_list[m - 1]
+        right = param_list[m]
 
-    ll = np.empty((len(param_list), len(data)), dtype=np.float64)
-    for i in range(len(param_list)):
-        p = param_list[i][:-1]
-        ll[i, :] = dist.pdf(data, *p) * param_list[i][-1]
-    return np.sum(np.log(np.sum(ll, 0)))
+        if normalise:
+            pdf = normalised_pdf
+        else:
+            pdf = scaled_pdf
+
+        def f(x):
+            return pdf(x, left, dist) - pdf(x, right, dist)
+
+        t.append(brentq(f, dist.median(*left[:-1]), dist.median(*right[:-1])))
+    return np.array(t)
 
 
-# FIXME this is actually the maximisation step
-def expectation_step(
+def hard_maximisation(
         data, thresholds, zero_loc=None, dist=stats.gamma, verbose=True
 ):
     """
@@ -464,6 +463,23 @@ def expectation_step(
     return param_list
 
 
+def mixture_model_ll(data, param_list, dist=stats.gamma):
+    """
+    Calculate the log likelihood of a mixture model.
+
+    :param ndarray data: the data used to construct the model.
+    :param param_list: list of parameters for each distribution in the model.
+    :param dist: the type of distribution to use (see scipy.stats).
+    :return: the log likelihood.
+    """
+
+    ll = np.empty((len(param_list), len(data)), dtype=np.float64)
+    for i in range(len(param_list)):
+        p = param_list[i][:-1]
+        ll[i, :] = dist.pdf(data, *p) * param_list[i][-1]
+    return np.sum(np.log(np.sum(ll, 0)))
+
+
 @jit
 def partition(data, thresholds, i):
     """
@@ -488,7 +504,8 @@ def partition(data, thresholds, i):
 
 
 def plot_mixture_model(
-        model, data=None, x=None, normalised=False, bins=16000, figsize=None
+        model, data=None, xrange=None, normalised=False, bins=500,
+        bar=False, figsize=None
 ):
     """
     Plot a mixture model optionally including a histogram of the modeled data.
@@ -496,14 +513,16 @@ def plot_mixture_model(
 
     :param MixtureModel model: the mixture model.
     :param ndarray data: the data to histogram.
-    :param ndarray x: the x values to plot.
+    :param tuple xrange: the x range to plot.
     :param bool normalised: normalise the model distributions.
     :param bins: passed to numpy.histogram().
     :param figsize: passed to matplotlib.pyplot.figure().
     :return: the figure handle.
     """
 
-    if data is None and x is None:
+    points = 10000  # number of x points for plotting pdfs
+
+    if data is None and xrange is None:
         raise AttributeError('Either data or x must be supplied')
 
     if figsize is None:
@@ -514,38 +533,77 @@ def plot_mixture_model(
     ax = fig.add_axes([0.12, 0.12, 0.87, 0.84])
     if data is not None:
         hist, edges = np.histogram(data, bins=bins)
-        w = edges[1] - edges[0]
-        c = edges[:-1] + w / 2
-        # x = np.linspace(edges[0], edges[-1], bins)
+        w = edges[1]-edges[0]
+        c = edges[:-1]+w/2
+        x = np.linspace(edges[0], edges[-1], points)
+
         max_p = max(hist)
         s = sum(hist) * w
         if not normalised:
-            ax.plot(
-                c[hist.nonzero()[0]],
-                hist[hist.nonzero()[0]],
-                's', color='darkgray', markerfacecolor='none', mew=0.5,
-                markersize=3, label='bin count'
-            )
+            cdfs = model.cdf(edges, scale=True)*sum(hist)
+            mhist = np.sum(cdfs[:, 1:]-cdfs[:, :-1], 0)
+
+            if bar:
+                ax.bar(
+                    c, hist, w, align='center',
+                    facecolor=(1, 0, 0, 0.2),
+                    edgecolor=(1, 1, 1, 1),
+                    lw=1, label='data bin'
+                )
+                ax.bar(
+                    c, mhist, w, align='center',
+                    facecolor=(0, 0, 1, 0.2),
+                    edgecolor=(1, 1, 1, 1),
+                    lw=1, label='model bin'
+                )
+            else:
+                ax.plot(
+                    c, hist, 'o',
+                    markeredgecolor='lightgray',
+                    markerfacecolor='none',
+                    markersize=5,
+                    # markeredgealpha=0.2,
+                    # alpha=0.2,
+                    lw=1, label='data bin',
+                    mew=0.5
+                )
+
+                ax.plot(
+                    c, mhist, 's',
+                    # color='b',
+                    markeredgecolor='lightgray',
+                    markerfacecolor='none',
+                    markersize=5,
+                    # alpha=0.2,
+                    lw=1, label='model bin',
+                    mew=0.5
+                )
+
         else:
             s = 1
+        mhist = None
+        hist = None
+        c = None
     else:
-        c = x
+        mhist = None
+        hist = None
+        c = None
         s = 1
+        x = np.linspace(*xrange, 10000)
 
-    pdfs = np.zeros((len(model.param_list), len(c)), np.float64)
-
+    pdfs = np.zeros((len(model.param_list), points), np.float64)
     for i in range(len(model.param_list)):
         if normalised:
-            pdfs[i, :] = normalised_pdf(c, model.param_list[i])
+            pdfs[i, :] = model.pdf(x, d=i)
         else:
-            pdfs[i, :] = scaled_pdf(c, model.param_list[i])*s
+            pdfs[i, :] = model.pdf(x, d=i, scale=True)*s
 
         if i == 0:
-            ax.plot(c, pdfs[i, :], lw=2, label='noise')
+            ax.plot(x, pdfs[i, :], lw=3, label='noise')
         elif i != 1:
-            ax.plot(c, pdfs[i, :], lw=2, label='{} photons'.format(i))
+            ax.plot(x, pdfs[i, :], lw=3, label='{} photons'.format(i))
         else:
-            ax.plot(c, pdfs[i, :], lw=2, label='{} photon'.format(i))
+            ax.plot(x, pdfs[i, :], lw=3, label='{} photon'.format(i))
 
     if data is None or normalised:
         max_p = np.max(pdfs[1:])
@@ -558,11 +616,11 @@ def plot_mixture_model(
 
     ax.set_ylim([0, max_p*1.1])
 
-    ax.plot(c, np.sum(pdfs, 0), 'k', lw=0.5, label='model')
+    ax.plot(x, np.sum(pdfs, 0), 'k', lw=1, label='model')
 
     if not normalised:
         thresh = np.array(
-            list(maximisation_step(
+            list(hard_expectation(
                 model.param_list, normalise=False, dist=model.dist
             )) + [model.thresholds[-1]]
         )
@@ -578,7 +636,7 @@ def plot_mixture_model(
     else:
         ax.set_ylabel('count')
     fig.legend()
-    return fig
+    return fig, hist, mhist, c
 
 
 """
@@ -877,13 +935,14 @@ def povm_elements(measurement_model, counts):
 
     num_elements = len(measurement_model.thresholds)
     # cumulative density functions at the thresholds, the last value is not used
-    cdf = measurement_model.cdf(measurement_model.thresholds)
+    # normalise to a convex mixture excluding the noise distribution.
+    cdfs = (measurement_model.cdf(measurement_model.thresholds))
 
     elements = np.zeros((num_elements, num_elements))
 
     # the majority of the POVM elements are given by the difference in the CDFs
     # at the threshold values
-    elements[1:-1, :-1] = cdf[1:, 1:]-cdf[1:, :-1]
+    elements[1:-1, :-1] = cdfs[1:, 1:]-cdfs[1:, :-1]
 
     # vacuum terms
     if counts.vacuum:
@@ -894,7 +953,7 @@ def povm_elements(measurement_model, counts):
         elements[0, 1] = 0
 
     # Adjust the first elements, which should not have a proceeding threshold.
-    elements[1:-1, 0] = cdf[1:, 1]
+    elements[1:-1, 0] = cdfs[1:, 1]
 
     # Adjust the last elements to account for the truncation.
     elements[:, -2] = 1-np.sum(elements[:, :-2], 1)
@@ -988,11 +1047,13 @@ def fit_state_least_squares(
     return c, n, fit
 
 
-def _resize_vector(a, max_index, copy=True):
+def resize_vector(a, max_index, copy=True):
+
     if max_index+1 > len(a):
         raise AttributeError('max_index must be <= len(a)')
     if max_index+1 == len(a):
         return a
+
     if copy:
         o = np.copy(a[:max_index+1])
     else:
@@ -1012,7 +1073,7 @@ def displaced_thermal(max_photon_number, nbar, alpha, N=100):
         for num in np.arange(0, N)
     ]
 
-    truncated_state = _resize_vector(np.real(state), max_photon_number)
+    truncated_state = resize_vector(np.real(state), max_photon_number)
 
     return truncated_state #/np.sum(truncated_state)
 
@@ -1022,15 +1083,15 @@ def outcome_probabilities(state, povm, max_photon_number):
     if max_photon_number is None:
         max_photon_number = len(povm.elements) - 2
     elif max_photon_number > len(povm.elements) - 2:
-            raise RuntimeError(
-                'max_photon_number must be at least 2 less than the number of '
-                'POVM elements ({})'.format(len(povm.elements) - 2)
-            )
+        raise AttributeError(
+            'max_photon_number must be at least 2 less than the number of '
+            'POVM elements ({})'.format(len(povm.elements) - 2)
+        )
 
     outcomes = np.zeros((max_photon_number+1, max_photon_number+1))
 
     for i in range(max_photon_number+1):
-        outcomes[i, :] = _resize_vector(
+        outcomes[i, :] = resize_vector(
             state*povm.elements[i, :], max_photon_number
         )
     return outcomes
@@ -1042,13 +1103,15 @@ def neg_log_likelihood(x, povm, counts, max_photon_number):
     #     povm = args[0]
     #     counts = args[1]
     #     max_photon_number = args[2]
+    if max_photon_number is None and povm is None:
+        pass
     if max_photon_number is None:
         max_photon_number = len(povm.elements) - 2
     if max_photon_number > len(povm.elements) - 2:
         raise AttributeError(
             'max_photon_number must be <= len(povm.elements)-2'
         )
-    c = _resize_vector(counts.count, max_photon_number)
+    c = resize_vector(counts.count, max_photon_number)
     # print(c, c.shape)
     state = displaced_thermal(len(povm.elements) - 1, *x, N=100)
     # print(state, state.shape)
@@ -1062,19 +1125,19 @@ def neg_log_likelihood(x, povm, counts, max_photon_number):
     return -ll
 
 
-def neg_log_likelihood2(x, povm, counts, max_photon_number):
+def neg_log_likelihood2(x, counts, max_photon_number):
     # x = (nbar, alpha)
     # args = (povm, counts, max_photon_number)
     #     povm = args[0]
     #     counts = args[1]
     #     max_photon_number = args[2]
     if max_photon_number is None:
-        max_photon_number = len(povm.elements) - 2
-    if max_photon_number > len(povm.elements) - 2:
+        max_photon_number = len(counts.count)-1
+    if max_photon_number > len(counts.count) - 1:
         raise AttributeError(
-            'max_photon_number must be <= len(povm.elements)-2'
+            'max_photon_number must be <= len(counts.count)-1'
         )
-    c = _resize_vector(counts.count, max_photon_number)
+    c = resize_vector(counts.count, max_photon_number)
     # print(c, c.shape)
     state = displaced_thermal(max_photon_number, *x, N=100)
     # print(state, state.shape)
@@ -1102,21 +1165,29 @@ def plot_state_fit(
     ax = fig.add_axes([0.12, 0.12, 0.84, 0.83])
 
     if max_photon_number is None:
-        max_photon_number = povm.elements.shape[1]-2
+        if povm is None:
+            max_photon_number = len(counts.count)-1
+        else:
+            max_photon_number = povm.elements.shape[1]-2
 
-    state = displaced_thermal(povm.elements.shape[1]-1, nbar, alpha, N=150)
-    outcomes = outcome_probabilities(state, povm, max_photon_number)
+    state = displaced_thermal(max_photon_number, nbar, alpha, N=150)
+    if povm is not None:
+        outcomes = outcome_probabilities(state, povm, max_photon_number)
 
     # model_counts = np.zeros_like(outcomes)
     # for i in range(model_counts.shape[0]):
     #     model_counts[i, :] = outcomes[i, :]*counts.count[i]
-    model_counts = _resize_vector(
-        np.sum(outcomes*sum(counts.count), 0), max_photon_number
-    )
-
+    if povm is not None:
+        model_counts = resize_vector(
+            np.sum(outcomes*sum(counts.count), 0), max_photon_number
+        )
+    else:
+        model_counts = resize_vector(
+            state*sum(counts.count), max_photon_number
+        )
 
     # print('model_count', model_counts.shape, model_counts)
-    c = _resize_vector(counts.count, max_photon_number)
+    c = resize_vector(counts.count, max_photon_number)
     # print(c.shape, c)
     fock = np.arange(0, max_photon_number+1)
     # print(fock.shape, fock)
