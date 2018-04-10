@@ -945,16 +945,6 @@ event_map = OrderedDict([
         type:tes.base.Height, input can be enum name or value.
         """
      )),
-    ('trace_signal',
-     RegInfo(
-         0x00000001, (0x00000C00, 10), False, Signal, signal_lookup, True,
-         doc="""
-        unsigned:2 bit
-        The signal to trace.
-
-        type:tes.base.Signal, input can be enum name or value.
-        """
-     )),
     ('trace_type',
      RegInfo(
          0x00000001, (0x00003000, 12), False, TraceType, trace_type_lookup,
@@ -964,6 +954,16 @@ event_map = OrderedDict([
         The type of trace to record, single average or dot_product.
 
         type:tes.base.TraceType, input can be enum name or value.
+        """
+     )),
+    ('trace_signal',
+     RegInfo(
+         0x00000001, (0x00000C00, 10), False, Signal, signal_lookup, True,
+         doc="""
+        unsigned:2 bit
+        The signal to trace.
+
+        type:tes.base.Signal, input can be enum name or value.
         """
      )),
     ('trace_pre',
