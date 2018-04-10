@@ -155,6 +155,7 @@ def _map_str(field, address):
 def _field_str(field):
     return '(0x{:08X},{:})'.format(*field) if field else '()'
 
+
 """set the transport for Registers"""
 _Transport = _ZmqTransport
 
@@ -397,6 +398,7 @@ def _to_gain(g):
 
 def _from_gain(value):
     return float(value/2)
+
 
 event_lookup = partial(lookup, enum=Detection)
 height_lookup = partial(lookup, enum=Height)
@@ -731,7 +733,7 @@ adc_map = OrderedDict([
         """
      )),
     ('pattern_high', RegInfo(
-        0x20000052, (0x0000003F,0), False, None, None, False,
+        0x20000052, (0x0000003F, 0), False, None, None, False,
         doc="""
         unsigned:6 bit
         The upper 6 bits of the custom test pattern.
@@ -882,8 +884,8 @@ cfd_map = OrderedDict([
         doc="""
         1 bit
         When True, the constant fraction thresholds are calculated from
-        the difference between the peak and the preceding minima, otherwise
-        from the peak height above zero.
+        the difference between the maxima of a rise and the preceding minima. 
+        Otherwise CFD threshold are calculated from the value of the maxima.
 
         type:bool
         """
@@ -917,18 +919,18 @@ event_map = OrderedDict([
         0x00000001, (0x0000000C, 2), False, Timing, timing_lookup, True,
         doc="""
         unsigned:2 bit
-        The point at which a peak is timestamped.
+        The point at which a rise is timestamped.
 
         type:tes.base.timing, input can be enum name or value.
         """
      )),
-    ('max_peaks',
+    ('max_rises',
      RegInfo(
         0x00000001, (0x000000F0, 4), False, None, None, True,
         doc="""
         unsigned:4 bit
-        The maximum number of peaks that a pulse event can record is
-        max_peaks+1. This sets the length of pulse events.
+        The maximum number of rises that a pulse event can record is
+        max_rises+1. This sets the length of pulse events.
 
         type:int
         """
@@ -964,6 +966,17 @@ event_map = OrderedDict([
         type:tes.base.TraceType, input can be enum name or value.
         """
      )),
+    ('trace_pre',
+     RegInfo(
+         0x00000400, (0x03FF0000, 16), False, None, None,
+         True,
+         doc="""
+        unsigned:10 bit
+        The number of samples the record before the timing point.
+
+        type:int, 
+        """
+     )),
     ('trace_stride',
      RegInfo(
          0x00000001, (0x0003C000, 14), False, None, None,
@@ -996,7 +1009,7 @@ event_map = OrderedDict([
         0x00000002, (), False, None, None, True,
         doc="""
         unsigned:16 bit
-        For a peak to be produce an event its maxima must be
+        For a rise to be produce an event its maxima must be
         greater than or equal to the pulse_threshold register.
 
         type:int
@@ -1008,8 +1021,9 @@ event_map = OrderedDict([
         doc="""
         unsigned:16 bit
         When slope makes a positive going crossing of slope_threshold
-        the peak detector is armed and remains armed until the slope
-        makes a negative going zero crossing.
+        the rise detector is armed and remains armed until the slope
+        makes a negative going zero crossing. For a rise to produce an
+        event the rise detector must be armed when the rise reaches its maxima.
 
         type:int
         """
@@ -1020,10 +1034,9 @@ event_map = OrderedDict([
         doc="""
         unsigned:32 bit
         The area of a pulse must be greater than or equal to
-        area_threshold to produce an area event or pulse event.
+        area_threshold to produce an area or pulse event packet.
 
         type:int
         """
      ))
 ])
-

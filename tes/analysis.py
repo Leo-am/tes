@@ -304,17 +304,16 @@ class MixtureModel(
 
 @jit
 def expectation_maximisation(
-    data, initial_thresholds, zero_loc=None, dist=stats.gamma,
-    tol=1, max_iter=30, verbose=True, normalise=False
+    data, initial_thresholds, fix_noise=None, dist=stats.gamma, tol=1,
+    max_iter=30, verbose=True, normalise=False
 ):
     """
     Fit a mixture of distributions to data.
 
-    :param ndarray data: the data to fit.
+    :param ndarray fit_data: the data to fit.
     :param initial_thresholds: initial thresholds that divide data into
            individual distributions in the mixture.
-    :param int or None zero_loc: if not None fixes the location parameter
-           of the first distribution in the mixture.
+    :param bool fix_noise: When True keep threshold[1] fixed.
     :param dist: the type of distribution to use (see scipy.stats)
     :param float tol: termination tolerance for change in log_likelihood.
     :param int max_iter: max iterations of expectation maximisation to use.
@@ -333,47 +332,50 @@ def expectation_maximisation(
 
     """
     # trim data
-    data = data[data > initial_thresholds[0]]
-    last_threshold = initial_thresholds[-1]
-    data = data[data <= last_threshold]
-    initial_thresholds = initial_thresholds[:-1]
+    fit_data = data[
+        and_l(data > initial_thresholds[0], data <= initial_thresholds[-1])
+    ]
+    # last_threshold = initial_thresholds[-1]
+    # data = data[data <= last_threshold]
+    thresholds = np.copy(initial_thresholds)
 
     i = 1
     if verbose:
         print(
             'Starting expectation maximisation, {} {} distributions'
-            .format(len(initial_thresholds), dist.name)
+            .format(len(initial_thresholds)-1, dist.name)
         )
         print('Iteration:{} maximisation'.format(i))
 
-    param_list = hard_maximisation(
-        data, initial_thresholds, zero_loc=zero_loc, dist=dist
-    )
+    param_list = hard_maximisation(fit_data, thresholds, dist=dist)
     if verbose:
         print('Iteration:{} expectation '.format(i))
-    new_thresh = np.array(
-        hard_expectation(param_list, dist=dist, normalise=normalise)
+    new_thresh = hard_expectation(
+            param_list, fix_noise=fix_noise, dist=dist, normalise=normalise
     )
-    ll = mixture_model_ll(data, param_list, dist=dist)
+
+    new_thresh.append(initial_thresholds[-1])
+    ll = mixture_model_ll(fit_data, param_list, dist=dist)
+    # return new_thresh, param_list, ll
     if verbose:
         print('Threshold changes:{!r}'.format(initial_thresholds - new_thresh))
         print('log likelihood:{}'.format(ll))
 
     converged = False
-    initial_thresholds = new_thresh
+    thresholds = np.array(new_thresh)
     while i < max_iter:
         i += 1
         if verbose:
             print('Iteration:{} maximisation'.format(i))
-        new_param_list = hard_maximisation(
-            data, initial_thresholds, zero_loc=zero_loc, dist=dist
-        )
+        new_param_list = hard_maximisation(fit_data, thresholds, dist=dist)
         if verbose:
             print('Iteration:{} expectation '.format(i))
-        new_thresh = np.array(
-            hard_expectation(new_param_list, dist=dist, normalise=normalise)
+        new_thresh = hard_expectation(
+                new_param_list, fix_noise=fix_noise, dist=dist,
+                normalise=normalise
         )
-        new_ll = mixture_model_ll(data, new_param_list, dist=dist)
+        new_thresh.append(initial_thresholds[-1])
+        new_ll = mixture_model_ll(fit_data, new_param_list, dist=dist)
         if verbose:
             print(
                 'Threshold changes:{!r}'.format(initial_thresholds - new_thresh)
@@ -390,37 +392,50 @@ def expectation_maximisation(
 
         ll = new_ll
         param_list = new_param_list
-        initial_thresholds = new_thresh
+        thresholds = np.array(new_thresh)
 
     if verbose:
         if converged:
             print('Converged')
         else:
             print('Maximum iterations reached')
-    thresholds = list(
-        hard_expectation(param_list, normalise=True, dist=dist)
-    ) + [last_threshold]
+
+    thresholds = hard_expectation(
+            param_list, fix_noise=fix_noise, normalise=True, dist=dist
+    )
+    thresholds.append(initial_thresholds[-1])
 
     return MixtureModel(
-        np.array(param_list), np.array(thresholds), zero_loc, ll, converged,
+        np.array(param_list), np.array(thresholds), fix_noise, ll, converged,
         dist
     )
 
 
-def hard_expectation(param_list, normalise=False, dist=stats.gamma):
+def hard_expectation(
+        param_list, fix_noise=None, normalise=False,
+        dist=stats.gamma
+):
     """
     Calculate the thresholds for a mixture model that define the data
     partitions.
 
     :param list param_list: list of parameters for the distributions in the
            mixture model, returned by expectation_maximisation().
+    :param fix_noise: Keep
     :param bool normalise: calculate thresholds based on a mixture of
            normalised pdf's.
     :param dist: type of distribution
     :return: ndarray of threshold values.
     """
-    t = [0]
-    for m in range(1, len(param_list)):
+
+    if fix_noise is None:
+        t = [0]
+        start = 1
+    else:
+        t = [0, fix_noise]
+        start = 2
+
+    for m in range(start, len(param_list)):
         left = param_list[m - 1]
         right = param_list[m]
 
@@ -433,30 +448,27 @@ def hard_expectation(param_list, normalise=False, dist=stats.gamma):
             return pdf(x, left, dist) - pdf(x, right, dist)
 
         t.append(brentq(f, dist.median(*left[:-1]), dist.median(*right[:-1])))
-    return np.array(t)
+
+    return t
 
 
 def hard_maximisation(
-        data, thresholds, zero_loc=None, dist=stats.gamma, verbose=True
+        data, thresholds, dist=stats.gamma, verbose=True
 ):
     """
     Fit distributions to the data partitioned by thresholds.
 
     :param data: the data to model.
     :param thresholds: thresholds that divide data into separate distributions.
-    :param zero_loc: fix location parameter for first distribution.
     :param dist: type of distribution to fit (scipy.stats).
     :param bool verbose: Print fitted distribution parameters.
     :return: list of parameters for each distribution.
     """
     param_list = []
     #     print('len thresholds',len(thresholds))
-    for i in range(len(thresholds)):
+    for i in range(1, len(thresholds)):
         part = partition(data, thresholds, i)
-        if zero_loc is not None and i == 0:
-            fit = dist.fit(part, floc=zero_loc)
-        else:
-            fit = dist.fit(part)
+        fit = dist.fit(part)
         if verbose:
             print('{} distribution:{} params:{}'.format(dist.name, i, fit))
         param_list.append(list(fit) + [len(part) / len(data)])
@@ -495,17 +507,14 @@ def partition(data, thresholds, i):
            maximisation algorithm used to fit data to a mixture model.
     """
 
-    if i == len(thresholds) - 1:
-        return data[data > thresholds[i]]
-    else:
-        return data[
-            np.bitwise_and(data > thresholds[i], data <= thresholds[i + 1])
-        ]
+    return data[
+        np.bitwise_and(data > thresholds[i-1], data <= thresholds[i])
+    ]
 
 
 def plot_mixture_model(
-        model, data=None, xrange=None, normalised=False, bins=500,
-        bar=False, figsize=None
+    model, data=None, xrange=None, normalised=False, bins=500, bar=False,
+    figsize=None
 ):
     """
     Plot a mixture model optionally including a histogram of the modeled data.
@@ -516,6 +525,7 @@ def plot_mixture_model(
     :param tuple xrange: the x range to plot.
     :param bool normalised: normalise the model distributions.
     :param bins: passed to numpy.histogram().
+    :param bool bar: Plot bars instead of markers.
     :param figsize: passed to matplotlib.pyplot.figure().
     :return: the figure handle.
     """
@@ -620,9 +630,10 @@ def plot_mixture_model(
 
     if not normalised:
         thresh = np.array(
-            list(hard_expectation(
-                model.param_list, normalise=False, dist=model.dist
-            )) + [model.thresholds[-1]]
+            hard_expectation(
+                model.param_list, fix_noise=model.thresholds[1],
+                normalise=False, dist=model.dist
+            )
         )
     else:
         thresh = model.thresholds
@@ -683,7 +694,7 @@ def x_correlation(s1, s2, r):
 
 
 @jit
-def drive_correlation(abs_time, mask, data, thresholds, r, verbose=False):
+def drive_correlation(abs_time, mask, data, r, thresholds=None, verbose=False):
     """
     Calculate the temporal cross-correlation between a channel measuring a
     heralding signal, ie the laser drive pulse, and a channel detecting photons.
@@ -706,32 +717,40 @@ def drive_correlation(abs_time, mask, data, thresholds, r, verbose=False):
     """
 
     xc = []
-    for t in range(len(thresholds)):
+    if thresholds is None:
         if verbose:
-            if t == 0:
-                print('Cross correlating Noise partition')
-            elif t == len(thresholds)-1:
-                print('Cross correlating {}+ photon partition'.format(t))
+            print('Cross correlating all events')
+        xc = x_correlation(abs_time[not_l(mask)], abs_time[mask], r)
+    else:
+        for t in range(len(thresholds)):
+            if verbose:
+                if t == 0:
+                    print('Cross correlating Noise partition')
+                elif t == len(thresholds)-1:
+                    print('Cross correlating {}+ photon partition'.format(t))
+                else:
+                    print('Cross correlating {} photon partition'.format(t))
+            if t == len(thresholds)-1:
+                xc.append(
+                    x_correlation(
+                        abs_time[not_l(mask)],
+                        abs_time[mask][data > thresholds[t]],
+                        r
+                    )
+                )
             else:
-                print('Cross correlating {} photon partition'.format(t))
-
-        if t == len(thresholds)-1:
-            xc.append(
-                x_correlation(
-                    abs_time[not_l(mask)],
-                    abs_time[mask][data > thresholds[t]],
-                    r
+                xc.append(
+                    x_correlation(
+                        abs_time[not_l(mask)],
+                        abs_time[mask][
+                            and_b(
+                                data > thresholds[t],
+                                data <= thresholds[t + 1]
+                            )
+                        ],
+                        r
+                    )
                 )
-            )
-        else:
-            xc.append(
-                x_correlation(
-                    abs_time[not_l(mask)],
-                    abs_time[mask]
-                    [and_b(data > thresholds[t], data <= thresholds[t + 1])],
-                    r
-                )
-            )
 
     return xc
 

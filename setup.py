@@ -14,5 +14,6 @@ setup(
     py_modules=[
         'tes.base', 'tes.maps', 'tes.mca', 'tes.registers', 'tes.analysis'
     ],
-    requires=['matplotlib', 'numpy', 'scipy', 'numba', 'qutip', 'lmfit']
+    requires=['matplotlib', 'numpy', 'scipy', 'numba', 'qutip', 'lmfit',
+              'pyzmq']
 )

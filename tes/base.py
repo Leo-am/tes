@@ -18,7 +18,7 @@ class VhdlEnum(int, Enum):
 
 class TraceType(VhdlEnum):
     """
-    Value of the trace_type field in eflags
+    Value of the trace_type event.trace_type register.
     """
     single = 0
     average = 1
@@ -37,6 +37,9 @@ class Signal(VhdlEnum):
 
 
 class Height(VhdlEnum):
+    """
+    Value of the event.height register.
+    """
     peak_height = 0
     cfd_high = 1
     cfd_height = 2
@@ -44,13 +47,29 @@ class Height(VhdlEnum):
 
 
 class Timing(VhdlEnum):
+    """
+    Value of the event.timing register.
+    """
     pulse_threshold = 0
     slope_threshold = 1
     cfd_low = 2
     max_slope = 3
 
 
+class Detection(VhdlEnum):
+    """
+    Value of the event.packet register.
+    """
+    rise = 0
+    area = 1
+    pulse = 2
+    trace = 3
+
+
 class Payload(VhdlEnum):
+    """
+    Payload type in capture files.
+    """
     rise = 0
     area = 1
     pulse = 2
@@ -68,6 +87,7 @@ def lookup(value, enum):
         return enum[value]
     else:
         return enum(value)
+
 
 tick_fmt = [
     ('period', 'u4'), ('eflags', '(2,)u1'), ('time', 'u2'),
@@ -88,16 +108,17 @@ rise_fmt = [
     ('height', 'i2'), ('rise_time', 'u2'), ('minimum', 'i2'), ('ptime', 'u2')
 ]
 dp_fmt = [('dot_product', 'u8')]
+
 sample_fmt = [('samples', '(2048,)i2')]
 
 
 def pulse_fmt(n):
-    if n < 1 or n > 8:
+    if n < 1 or n > 4:
         raise RuntimeError('n out of range 0 < n < 8')
     if n == 1:
         return header_fmt + pulse_header_fmt + rise_fmt
     else:
-        return header_fmt + pulse_header_fmt + [('rises', rise_fmt, (2,))]
+        return header_fmt + pulse_header_fmt + [('rises', rise_fmt, (n,))]
 
 
 dot_product_dt = np.dtype(
