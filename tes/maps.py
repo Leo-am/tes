@@ -968,7 +968,7 @@ event_map = OrderedDict([
      )),
     ('trace_pre',
      RegInfo(
-         0x00000400, (0x03FF0000, 16), False, None, None,
+         0x00000400, (0xFFFF0000, 16), False, None, None,
          True,
          doc="""
         unsigned:10 bit

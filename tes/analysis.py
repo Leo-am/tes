@@ -103,7 +103,7 @@ def plot_guess(hist, f, x, max_i, init_t, figsize=None):
 
 
 # @jit
-def refactor_time(events, tdat, fidx, tidx):
+def retime(events, tdat, fidx, tidx):
     # TODO generalise
     # remove incorporate tick relative times
     #     events = edat.view(event_dt)
@@ -310,7 +310,7 @@ def expectation_maximisation(
     """
     Fit a mixture of distributions to data.
 
-    :param ndarray fit_data: the data to fit.
+    :param ndarray data: the measurement data.
     :param initial_thresholds: initial thresholds that divide data into
            individual distributions in the mixture.
     :param bool fix_noise: When True keep threshold[1] fixed.

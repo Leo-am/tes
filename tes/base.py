@@ -95,39 +95,54 @@ tick_fmt = [
     ('overflow', 'u1'), ('error', 'u1'), ('cfd_error', 'u1'), ('res2', 'u1'),
     ('events_lost', 'u4')
 ]
-#
-# dot_product_fmt = [('dot_product', 'u8')]
+
 header_fmt = [
     ('size', 'u2'), ('tflags', '(2,)u1'), ('eflags', '(2,)u1'),
     ('time', 'u2')
 ]
+
 pulse_header_fmt = [
     ('area', 'u4'), ('pulse_length', 'u2'), ('pre_trigger', 'u2')
 ]
-rise_fmt = [
+
+pulse_rise_fmt = [
     ('height', 'i2'), ('rise_time', 'u2'), ('minimum', 'i2'), ('ptime', 'u2')
 ]
-dp_fmt = [('dot_product', 'u8')]
+
+rise_fmt = [
+    ('height', 'i2'), ('minimum', 'i2'), ('eflags', '(2,)u1'), ('time', 'u2')
+]
+
+
+def rise2_fmt(n):
+    s = '({},)'.format(n)
+    if n < 1 or n > 4:
+        raise RuntimeError('{} out of range 0 to 3'.format(n))
+    return [
+        (field[0], '({},){}'.format(n, field[1])) for field in pulse_rise_fmt
+    ]
+
+
+area_fmt = [
+    ('area', 'u4'), ('eflags', '(2,)u1'), ('time', 'u2')
+]
+
+dot_product_fmt = [('dot_product', 'u8')]
+
+av_trace_fmt = header_fmt + [('multi_pulse', 'u4'), ('multi_peak', 'u4')]
 
 sample_fmt = [('samples', '(2048,)i2')]
 
 
 def pulse_fmt(n):
     if n < 1 or n > 4:
-        raise RuntimeError('n out of range 0 < n < 8')
-    if n == 1:
-        return header_fmt + pulse_header_fmt + rise_fmt
-    else:
-        return header_fmt + pulse_header_fmt + [('rises', rise_fmt, (n,))]
+        raise RuntimeError('{} out of range 0 to 3'.format(n))
+    return header_fmt + pulse_header_fmt + [('rise', pulse_rise_fmt, (n,))]
 
-
-dot_product_dt = np.dtype(
-    header_fmt + pulse_header_fmt + [('rises', rise_fmt, (2,))] +
-    dp_fmt
-)
 
 tick_dt = np.dtype(tick_fmt)
 
+# type bit 7 seq error, bit 6 header frame
 fidx_dt = np.dtype([
     ('payload', 'u8'), ('length', 'u4'), ('event_size', 'u2'),
     ('changed', 'u1'), ('type', 'u1')
