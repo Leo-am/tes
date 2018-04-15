@@ -271,33 +271,37 @@ class CaptureData:
         # Otherwise the transport frames need to be iterated over to extract the
         # fields.
         event_fields = {}
-        tick_idx = np.zeros(len(self.tidx)+1, np.uint64)
+        tick_idx = np.zeros(len(self.tidx), np.uint64)
         if len(self.fidx['changed'].nonzero()[0]) == 0:
-            e_type = self.fidx['type'][self.fidx['type'] < 7][0]
-            self._homogeneous = self._dtype_from_frame(1, full=True)
+            # The event stream is homogeneous, edat has a single dtype
+            event_frame_idxs = np.where(self._frame_payload_types < 7)[0]
+            self._homogeneous = self._dtype_from_frame(
+                event_frame_idxs[0], full=True
+            )  # The single dtype for edat
             data = self.edat.view(self._homogeneous)
+            # record fields to the event_fields dict
             for field in self._homogeneous.names:
                 if field == 'time':
                     event_fields[field] = np.array(data[field], copy=True)
                 else:
                     event_fields[field] = data[field]
 
-            events = 0
+            # create tick_idx that contains the indices in edat, viewed as the
+            # homogeneous type, that immediately follow tick events.
             for t in range(0, len(self.tidx)):
-                f_start = self.tidx[t][0]
-                f_stop = self.tidx[t][1]
-                p_start = self.fidx[f_start][0]
-                p_stop = self.fidx[f_stop][0] + self.fidx[f_stop][1]
-                if e_type in [3, 4, 6]:
-                    # indexed by ridx
+                f_start = self.tidx[t]['start']  # first frame in tick
+                f_last = self.tidx[t]['stop']    # last frame in tick
+                p_start = self.fidx[f_start]['payload']  # start payload range
+                p_stop = p_start+self.fidx[f_last]['length']
+                if self.has_traces:  # homogeneous, must be all traces
+                    # indices of traces in this payload range
+                    # fixme this won't work when there are not traces between ticks
                     i = np.where(and_l(self.ridx['start'] >= p_start,
                                        self.ridx['start'] < p_stop))[0]
-                    tick_idx[t+1] = i[-1]+1
+                    if t < len(tick_idx)-1:
+                        tick_idx[t] = i[-1]+1
                 else:
-                    pf = self.fidx[pf_mask[f_start:f_stop]]
-                    events += np.sum(pf['length']//(pf['event_size']*8), 0)
-                    # TODO this is wrong
-                    tick_idx[t+1] = events
+                    tick_idx[t] = p_start//self._homogeneous.itemsize
 
         else:
             self._homogeneous = None
@@ -360,6 +364,9 @@ class CaptureData:
             self._trace_mask = trace_mask
 
         event_fields['time'][0] = 2**16-1
+        # print(tick_idx[-10:])
+        # print(len(tick_idx))
+        # print(len(self.tidx))
         for t in range(1, len(self.tidx)):
             time0 = min(
                 int(self.tdat['time'][t])+event_fields['time'][tick_idx[t]],
@@ -503,7 +510,9 @@ class CaptureData:
                 pulse_fmt(self.fidx[frame]['event_size']-2)+dot_product_fmt
             )
 
-        raise NotImplementedError('payload type not yet implemented')
+        raise NotImplementedError(
+            'payload type {} not yet implemented'.format(p)
+        )
 
     def _frame_event_data(self, frame):
         """

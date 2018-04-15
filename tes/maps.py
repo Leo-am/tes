@@ -972,7 +972,9 @@ event_map = OrderedDict([
          True,
          doc="""
         unsigned:10 bit
-        The number of samples the record before the timing point.
+        Time (4ns clocks) to record before the timing point. Note, the 
+        trace_stride setting effects the number of samples before the timing 
+        point and whether the timing point is represented by a sample.
 
         type:int, 
         """
