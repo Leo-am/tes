@@ -106,7 +106,7 @@ pulse_header_fmt = [
 ]
 
 pulse_rise_fmt = [
-    ('height', 'i2'), ('rise_time', 'u2'), ('minimum', 'i2'), ('ptime', 'u2')
+    ('height', 'i2'), ('minimum', 'i2'), ('rise_time', 'u2'), ('ptime', 'u2')
 ]
 
 rise_fmt = [

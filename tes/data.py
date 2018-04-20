@@ -89,8 +89,8 @@ class CaptureResult(namedtuple(
 
 
 def capture(
-        filename, measurement, ticks=10, events=0, write_mode=1,
-        conversion_mode=0, capture_mode=1
+        filename, measurement, use_existing=1, access_mode=1, ticks=10,
+        events=0, conversion_mode=0
 ):
     """
     Capture FPGA output as a collection of data and index files.
@@ -111,18 +111,19 @@ def capture(
 
     sock.send_multipart(
         [
-            bytes(filename, encoding='utf8'),
-            bytes(measurement, encoding='utf8'),
+            bytes(str(filename), encoding='utf8'),
+            bytes(str(measurement), encoding='utf8'),
+            bytes('{}'.format(use_existing), encoding='utf8'),
+            bytes('{}'.format(access_mode), encoding='utf8'),
             bytes('{}'.format(ticks), encoding='utf8'),
             bytes('{}'.format(events), encoding='utf8'),
-            bytes('{}'.format(write_mode), encoding='utf8'),
-            bytes('{}'.format(conversion_mode), encoding='utf8'),
-            bytes('{}'.format(capture_mode), encoding='utf8')
+            bytes('{}'.format(conversion_mode), encoding='utf8')
         ]
     )
 
     r = sock.recv_multipart()
-    if int(int(r[0])) != 0:
+    if int(r[0]) != 0:
+        print(int(r[0]))
         if int(r[0]) == 1:
             msg = 'Malformed request'
         elif int(r[0]) == 2:
@@ -200,17 +201,27 @@ def av_trace(timeout=30):
 
 
 def _memmap_data(path, file, dtype=np.uint8):
-    if os.stat(path + file).st_size == 0:
+    fpath = os.path.join(path, file)
+    if os.stat(fpath).st_size == 0:
         return None
     else:
-        return np.memmap(path + file, dtype=dtype)
+        return np.memmap(fpath, dtype=dtype)
+
+
+index_name = 'nonhomogeneous'
+samples_name = 'extracted_samples'
 
 
 class CaptureData:
 
     def __init__(self, path):
 
-        # memmap the files
+        if not os.path.isdir(path):
+            raise AttributeError('{} is not a directory'.format(path))
+
+        self.path=path
+
+        # memmap the files from the capture server
         self.edat = _memmap_data(path, 'edat', dtype=np.uint8)
         self.fidx = _memmap_data(path, 'fidx', dtype=fidx_dt)
         self.tidx = _memmap_data(path, 'tidx', dtype=tidx_dt)
@@ -253,23 +264,13 @@ class CaptureData:
         for s in pulse_sizes:
             max_rises = max(max_rises, s-2)
 
-        if self.has_traces:
-            trace_sizes = set(self.ridx['length'])
-            for s in trace_sizes:
-                i = np.where(self.ridx['length'] == s)[0]
-                max_rises = max(
-                    max_rises,
-                    self._trace_specs_from_payload(
-                        self.ridx[i[0]]['start']
-                    )[0]-2  # offset-2
-                )
-        # print('max_rises', max_rises)
-        # return
+        """
+        Homogeneous data sets are generated when each channel produces events
+        of the same type and size, in this case edat is a contiguous array.
+        Otherwise the transport frames need to be iterated over to extract the
+        fields.
+        """
 
-        # homogeneous data sets are generated when each channel produces events
-        # of the same type and size, in this case edat is a contiguous array.
-        # Otherwise the transport frames need to be iterated over to extract the
-        # fields.
         event_fields = {}
         tick_idx = np.zeros(len(self.tidx), np.uint64)
         if len(self.fidx['changed'].nonzero()[0]) == 0:
@@ -282,6 +283,8 @@ class CaptureData:
             # record fields to the event_fields dict
             for field in self._homogeneous.names:
                 if field == 'time':
+                    # use copy of time field to it can be adjusted for ticks
+                    # without changing the original data
                     event_fields[field] = np.array(data[field], copy=True)
                 else:
                     event_fields[field] = data[field]
@@ -295,7 +298,7 @@ class CaptureData:
                 p_stop = p_start+self.fidx[f_last]['length']
                 if self.has_traces:  # homogeneous, must be all traces
                     # indices of traces in this payload range
-                    # fixme this won't work when there are not traces between ticks
+                    # FIXME breaks when there are no traces between ticks
                     i = np.where(and_l(self.ridx['start'] >= p_start,
                                        self.ridx['start'] < p_stop))[0]
                     if t < len(tick_idx)-1:
@@ -303,79 +306,127 @@ class CaptureData:
                 else:
                     tick_idx[t] = p_start//self._homogeneous.itemsize
 
+            self._fields = event_fields
+            self._tick_idx = tick_idx
+            self._retime()
+
         else:
             self._homogeneous = None
 
             # extract common fields from frames to form contiguous arrays
             # extract rises as contiguous array with max_rises per event
             # TODO generalise to more than two channels and optimise performance
-            print('Non homogeneous capture, collating data from frames')
-            type_fields = [self._event_fields(p) for p in self.event_types]
-            common_fields = set(type_fields[0].keys())
-            for field in type_fields[:-1]:
-                common_fields = common_fields & set(field.keys())
+            print('Non homogeneous capture.')
 
-            # allocate contiguous arrays for collating the fields
-            for field in common_fields:
-                if field == 'rise':
-                    event_fields[field] = np.zeros(
-                        (event_count, max_rises), np.dtype(pulse_rise_fmt)
-                    )
-                else:
-                    for t in type_fields:
-                        if field in t:
-                            event_fields[field] = np.zeros(
-                                event_count, t[field][0]
+            if (path/index_name).with_suffix('.npz').exists():
+                print('Loading data extracted previously.')
+                nh_data = np.load(
+                    (path / index_name).with_suffix('.npz')
+                )
+                self._idx = nh_data['idx']
+                self._trace_mask = nh_data['trace_mask']
+                self._fields = nh_data['event_fields'][()]
+            else:
+                print('Extracting data from transport frames.')
+                type_fields = [self._event_fields(p) for p in self.event_types]
+                common_fields = set(type_fields[0].keys())
+                for field in type_fields[:-1]:
+                    common_fields = common_fields & set(field.keys())
+
+                # allocate contiguous arrays for collating the fields
+                for field in common_fields:
+                    # TODO
+                    """ 
+                    Add better handling when the number of rises is different 
+                    for each channel. 
+                    """
+                    if field == 'rise':
+                        event_fields[field] = np.zeros(
+                            (event_count, max_rises), np.dtype(pulse_rise_fmt)
+                        )
+                    else:
+                        for t in type_fields:
+                            if field in t:
+                                event_fields[field] = np.zeros(
+                                    event_count, t[field][0]
+                                )
+                                break
+                # trace_mask True means idx points to ridx else fidx
+                trace_mask = np.zeros(self.event_count, np.bool)
+                idx = np.zeros(self.event_count, np.uint64)
+                t_i = 0
+                e_i = 0
+                r_i = 0
+                # adjust time field to account for tick events
+                for f in range(len(self.fidx)):
+                    f_type = self.fidx[f]['type'] & 0x0F
+                    if f_type == Payload.tick:
+                        if t_i < len(tick_idx):
+                            tick_idx[t_i] = (
+                                e_i if e_i < event_count else event_count
                             )
-                            break
-
-            # trace_mask True means idx points to ridx else fidx
-            trace_mask = np.zeros(self.event_count, np.bool)
-            idx = np.zeros(self.event_count, np.uint64)
-            t_i = 0
-            e_i = 0
-            r_i = 0
-            # adjust time field to account for tick events
-            for f in range(len(self.fidx)):
-                f_type = self.fidx[f]['type'] & 0x0F
-                if f_type == Payload.tick:
-                    tick_idx[t_i] = e_i if e_i < event_count else event_count
-                    t_i += 1
-                elif f_type in [0, 1, 2, 5]:
-                    # frame carrying multiple events
-                    f_data = self._frame_event_data(f)
-                    stop = e_i+len(f_data)
-                    for field in event_fields:
-                        event_fields[field][e_i:stop] = f_data[field]
-                    idx[e_i:stop] = f
-                    e_i += len(f_data)
-                elif f_type in [3, 4, 6] and self.fidx[f]['type'] & 0x40:
-                    # trace_header
-                    if self.ridx[r_i][0] == self.fidx[f][0]:  # good trace
+                        t_i += 1
+                    elif f_type in [0, 1, 2, 5]:
+                        # frame carrying multiple events
                         f_data = self._frame_event_data(f)
+                        stop = e_i+len(f_data)
                         for field in event_fields:
-                            event_fields[field][e_i] = f_data[field]
-                        trace_mask[e_i] = True
-                        idx[e_i] = r_i
-                        e_i += 1
-                        r_i += 1
+                            event_fields[field][e_i:stop] = f_data[field]
+                        idx[e_i:stop] = f
+                        e_i += len(f_data)
+                    elif f_type in [3, 4, 6] and self.fidx[f]['type'] & 0x40:
+                        # trace_header
+                        if self.ridx[r_i][0] == self.fidx[f][0]:  # good trace
+                            f_data = self._frame_event_data(f)
+                            for field in event_fields:
+                                event_fields[field][e_i] = f_data[field]
+                            trace_mask[e_i] = True
+                            idx[e_i] = r_i
+                            e_i += 1
+                            r_i += 1
 
-            self._idx = idx
-            self._trace_mask = trace_mask
+                if self.has_traces:
+                    # add samples field but only extract on first request.
+                    event_fields['samples'] = None
 
-        event_fields['time'][0] = 2**16-1
-        # print(tick_idx[-10:])
-        # print(len(tick_idx))
-        # print(len(self.tidx))
+                self._idx = idx
+                self._trace_mask = trace_mask
+                self._fields = event_fields
+                self._tick_idx = tick_idx
+                self._retime()
+                np.savez(
+                    path / index_name,
+                    idx=idx,
+                    trace_mask=trace_mask,
+                    event_fields=event_fields
+                )
+
+    def _extract_samples(self):
+        """
+        Extract samples from non a homogeneous dataset.
+        :return: ndarray of samples
+        :notes: Assumes that all traces in the data set are the same shape.
+        """
+        offset, length, trace_type = self._trace_specs_from_ridx(0)
+        samples = np.zeros((len(self.ridx), (length-8*offset)//2))
+        for r in range(len(self.ridx)):
+            samples[r, :] = self._trace(self.ridx[r])['samples']
+        return samples
+
+    def _retime(self):
+        """
+        Adjust time field by compensating for relative time in each tick frame.
+        :return: None
+        """
+        self._fields['time'][0] = 2**16-1
         for t in range(1, len(self.tidx)):
-            time0 = min(
-                int(self.tdat['time'][t])+event_fields['time'][tick_idx[t]],
-                2**16-1
-            )
-            event_fields['time'][tick_idx[t]] = time0
-
-        self._fields = event_fields
-        self._tick_idx = tick_idx
+            if self._tick_idx[t] < len(self._fields['time']):
+                time0 = min(
+                    int(self.tdat['time'][t]) +
+                    self._fields['time'][self._tick_idx[t]],
+                    2**16-1
+                )
+                self._fields['time'][self._tick_idx[t]] = time0
 
     def _is_event_field(self, field):
         if '_fields' in self.__dict__.keys():
@@ -385,6 +436,23 @@ class CaptureData:
 
     def __getattr__(self, item):
         if self._is_event_field(item):
+
+            if item == 'samples':
+                fields = self.__dict__['_fields']
+                if fields[item] is None:
+                    npzfile = (self.path/samples_name).with_suffix('.npz')
+                    if npzfile.exists():
+                        data = np.load(npzfile)
+                        fields[item] = data['samples']
+                    else:
+                        print('Extracting samples.')
+                        samples = self._extract_samples()
+                        np.savez(
+                            (self.path / samples_name).with_suffix('.npz'),
+                            samples=samples
+                        )
+                        fields[item] = samples
+
             return self.__dict__['_fields'][item]
         else:
             raise AttributeError('no attribute or field {}'.format(item))
@@ -454,6 +522,14 @@ class CaptureData:
         else:
             return offset, self.fidx[frame]['length'], payload_type
 
+    def _trace_specs_from_ridx(self, ridx):
+        """
+        get trace specs from a entry in ridx
+        :param int ridx: the ridx entry
+        :return: offset, length, payload_type
+        """
+        return self._trace_specs_from_payload(self.ridx[ridx]['start'])
+
     def _trace_dtype_from_payload(self, payload):
         offset, length, trace_payload = (
             self._trace_specs_from_payload(payload)
@@ -488,12 +564,14 @@ class CaptureData:
                 )
             return np.dtype(np.int16)
 
-    def _trace(self, ridx):
-        payload = self.ridx[ridx][0]
-        offset, length, trace_payload = self._trace_specs_from_payload(payload)
+    def _trace(self, ridx_entry):
+        offset, length, trace_payload = (
+            self._trace_specs_from_payload(ridx_entry[0])
+        )
         dtype = self._trace_header_fmt(offset, length, trace_payload)
-        # print(dtype.itemsize)
-        return self.edat[payload:payload+self.ridx[ridx][1]].view(dtype)[0]
+        return (
+            self.edat[ridx_entry[0]:ridx_entry[0]+ridx_entry[1]].view(dtype)[0]
+        )
 
     def _dtype_from_frame(self, frame, full=False):
         p = Payload(self.fidx[frame]['type'] & 0x0F)
@@ -567,3 +645,5 @@ class CaptureData:
             'Not implemented for {}'.format(Payload(payload))
         )
 
+    def mask(self, channel):
+        return self.eflags[:, 0] & 0x07 == channel

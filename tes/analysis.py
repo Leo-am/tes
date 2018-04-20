@@ -2,6 +2,7 @@
 Calibration and modeling
 """
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import numpy as np
 from numpy import (
     bitwise_and as and_b, logical_and as and_l, logical_or as or_l,
@@ -14,6 +15,7 @@ from numba import jit
 from collections import namedtuple
 import qutip as qt
 from lmfit import Model
+from pathlib import Path
 
 
 @jit
@@ -213,7 +215,7 @@ class MixtureModel(
         :param filename: filename excluding extension"
         :return: instance of MixtureModel.
         """
-        d = np.load(filename+'.npz')
+        d = np.load(Path(filename).with_suffix('.npz'))
         return MixtureModel(
             d['param_list'],
             d['thresholds'],
@@ -304,7 +306,7 @@ class MixtureModel(
 
 @jit
 def expectation_maximisation(
-    data, initial_thresholds, fix_noise=None, dist=stats.gamma, tol=1,
+    data, initial_thresholds, fix_noise=None, dist=stats.gamma, tol=0.01,
     max_iter=30, verbose=True, normalise=False
 ):
     """
@@ -378,9 +380,9 @@ def expectation_maximisation(
         new_ll = mixture_model_ll(fit_data, new_param_list, dist=dist)
         if verbose:
             print(
-                'Threshold changes:{!r}'.format(initial_thresholds - new_thresh)
+                'Threshold changes:{!r}'.format(thresholds - new_thresh)
             )
-            print('log likelihood:{} change:{}'.format(new_ll, ll-new_ll))
+            print('log likelihood:{} change:{}'.format(new_ll, new_ll-ll))
 
         # terminate if tol met or ll goes down. FIXME is this appropriate?
         if abs(new_ll - ll) <= tol or new_ll < ll:
@@ -400,10 +402,15 @@ def expectation_maximisation(
         else:
             print('Maximum iterations reached')
 
+    # calculate the normalised thresholds
     thresholds = hard_expectation(
             param_list, fix_noise=fix_noise, normalise=True, dist=dist
     )
+    # add the terminal threshold which is never fitted but marks the end of the
+    # data that was used in fitting the model
     thresholds.append(initial_thresholds[-1])
+
+    # calculate the threshold masks
 
     return MixtureModel(
         np.array(param_list), np.array(thresholds), fix_noise, ll, converged,
@@ -513,8 +520,8 @@ def partition(data, thresholds, i):
 
 
 def plot_mixture_model(
-    model, data=None, xrange=None, normalised=False, bins=500, bar=False,
-    figsize=None
+    model, vacuum=False, data=None, counts=None, xrange=None, normalised=False,
+    bins=500, bar=False, figsize=None
 ):
     """
     Plot a mixture model optionally including a histogram of the modeled data.
@@ -541,6 +548,9 @@ def plot_mixture_model(
         fig = plt.figure(figsize=figsize)
 
     ax = fig.add_axes([0.12, 0.12, 0.87, 0.84])
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+
     if data is not None:
         hist, edges = np.histogram(data, bins=bins)
         w = edges[1]-edges[0]
@@ -554,38 +564,27 @@ def plot_mixture_model(
             mhist = np.sum(cdfs[:, 1:]-cdfs[:, :-1], 0)
 
             if bar:
-                ax.bar(
+                data_handle = ax.bar(
                     c, hist, w, align='center',
                     facecolor=(1, 0, 0, 0.2),
                     edgecolor=(1, 1, 1, 1),
                     lw=1, label='data bin'
                 )
-                ax.bar(
+                model_data_handle = ax.bar(
                     c, mhist, w, align='center',
                     facecolor=(0, 0, 1, 0.2),
                     edgecolor=(1, 1, 1, 1),
                     lw=1, label='model bin'
                 )
             else:
-                ax.plot(
-                    c, hist, 'o',
-                    markeredgecolor='lightgray',
+                data_handle, = ax.plot(
+                    c, hist, 's',
+                    markeredgecolor='gray',
                     markerfacecolor='none',
-                    markersize=5,
+                    markersize=4,
                     # markeredgealpha=0.2,
                     # alpha=0.2,
                     lw=1, label='data bin',
-                    mew=0.5
-                )
-
-                ax.plot(
-                    c, mhist, 's',
-                    # color='b',
-                    markeredgecolor='lightgray',
-                    markerfacecolor='none',
-                    markersize=5,
-                    # alpha=0.2,
-                    lw=1, label='model bin',
                     mew=0.5
                 )
 
@@ -601,19 +600,19 @@ def plot_mixture_model(
         s = 1
         x = np.linspace(*xrange, 10000)
 
+    ax.set_prop_cycle(None)
+
     pdfs = np.zeros((len(model.param_list), points), np.float64)
+    pdf_handles = []
     for i in range(len(model.param_list)):
+
         if normalised:
             pdfs[i, :] = model.pdf(x, d=i)
         else:
             pdfs[i, :] = model.pdf(x, d=i, scale=True)*s
 
-        if i == 0:
-            ax.plot(x, pdfs[i, :], lw=3, label='noise')
-        elif i != 1:
-            ax.plot(x, pdfs[i, :], lw=3, label='{} photons'.format(i))
-        else:
-            ax.plot(x, pdfs[i, :], lw=3, label='{} photon'.format(i))
+        h, = ax.plot(x, pdfs[i, :], lw=3)
+        pdf_handles.append(h)
 
     if data is None or normalised:
         max_p = np.max(pdfs[1:])
@@ -624,11 +623,10 @@ def plot_mixture_model(
     else:
         ax.set_xlim([-10, max(data)])
 
-    ax.set_ylim([0, max_p*1.1])
-
-    ax.plot(x, np.sum(pdfs, 0), 'k', lw=1, label='model')
+    model_handle, = ax.plot(x, np.sum(pdfs, 0), 'k', lw=1, label='model')
 
     if not normalised:
+        # FIXME fix_noise??
         thresh = np.array(
             hard_expectation(
                 model.param_list, fix_noise=model.thresholds[1],
@@ -639,15 +637,91 @@ def plot_mixture_model(
         thresh = model.thresholds
 
     for t in thresh:
-        ax.plot([t, t], [0, max_p], ':k', lw=1)
+        ax.axvline(t, color='k', linestyle='--', lw=0.5)
+        # ax.plot([t, t], [0, max_p], ':k', lw=1)
 
-    ax.set_xlabel('area')
     if normalised:
         ax.set_ylabel('probability')
     else:
         ax.set_ylabel('count')
-    fig.legend()
+
+    legend_labels = []
+    if not normalised and data is not None:
+        for t in range(len(pdf_handles)):
+            if not vacuum:
+                p = t+1
+            if t == 0 and vacuum:
+                label = 'noise'
+            elif t == len(pdf_handles)-1:
+                print('there')
+                label = '{}+ photons'
+            elif p == 1:
+                label = '{} photon'
+            else:
+                label = '{} photons'
+
+            if counts is not None:
+                if t == len(pdf_handles)-1:
+                    legend_labels.append(
+                        '{} {:,}'.format(label.format(p),
+                        np.sum(counts.count[t:]))
+                    )
+                else:
+                    legend_labels.append(
+                        '{} {:,}'.format(label.format(p), counts.count[t])
+                    )
+            else:
+                legend_labels.append(label.format(p))
+
+    legend_handles = pdf_handles + [model_handle]
+
+    if counts is not None:
+        legend_labels.append('model {:,}'.format(sum(counts.count)))
+    else:
+        legend_labels.append('model')
+
+    if data is not None and not normalised:
+        legend_handles += [data_handle]
+        legend_labels += ['data bin']
+        if bar:
+            legend_handles += [model_data_handle]
+            legend_labels += ['model bin']
+
+    fig.legend(
+        legend_handles, legend_labels, frameon=False,
+        bbox_to_anchor=(0.95, 0.95), bbox_transform=fig.transFigure
+    )
+
+    ax.set_xticks(list(model.thresholds))
+    exp = int(np.floor(np.log10(model.thresholds[-1])))
+    tick_values = model.thresholds/10**exp
+    tick_labels = [r'${:3.2f}$'.format(tick) for tick in tick_values]
+    ax.set_xticklabels(tick_labels)
+    ax.set_xlabel(r'FPGA area measurement/$10^{{ {} }}$'.format(exp))
+
+    # fmtr = mpl.ticker.StrMethodFormatter(r'${x:1.1}$')
+    # ax.xaxis.set_major_formatter(fmtr)
+
     return fig, hist, mhist, c
+
+
+def threshold_masks(data, model):
+    """
+
+    :param data:
+    :param model:
+    :return:
+    """
+    masks = np.zeros((len(model.thresholds), len(data)), np.bool)
+    for t in range(len(model.thresholds[:-1])):
+        if t == 0:
+            masks[0, :] = data <= model.thresholds[1]
+        else:
+            masks[t, :] = and_l(
+                data > model.thresholds[t], data <= model.thresholds[t+1]
+            )
+    masks[-1, :] = data > model.thresholds[-2]
+    return masks
 
 
 """
@@ -694,7 +768,9 @@ def x_correlation(s1, s2, r):
 
 
 @jit
-def drive_correlation(abs_time, mask, data, r, thresholds=None, verbose=False):
+def drive_correlation(
+    abs_time, detection_mask, r, masks=None, verbose=False
+):
     """
     Calculate the temporal cross-correlation between a channel measuring a
     heralding signal, ie the laser drive pulse, and a channel detecting photons.
@@ -703,11 +779,15 @@ def drive_correlation(abs_time, mask, data, r, thresholds=None, verbose=False):
 
 
     :param ndarray abs_time: absolute timestamp sequence.
-    :param ndarray mask: boolean mask that identifies the entries in abs_time
-                         belonging to the photon channel, other entries are
-                         assumed to be the heralding channel.
+    :param ndarray detection_mask: boolean mask that identifies the entries in
+                                   abs_time belonging to the photon channel,
+                                   other entries are assumed to be the heralding
+                                   channel.
     :param ndarray data: energy measurement data for the photon channel.
-    :param thresholds: thresholds that partition data into photon number.
+    :param ndarray masks: boolean masks that are appied to
+                          abs_time[detection_mask] and indicate which detections
+                          are assigned which threshold.
+                          Shape(N, len(abs_time[detection_mask]))
     :param r: the range of heralding channel delays to cross correlate.
     :param bool verbose: Print progress message as each threshold is processed.
     :return: list of ndarrays representing the cross correlation.
@@ -717,42 +797,27 @@ def drive_correlation(abs_time, mask, data, r, thresholds=None, verbose=False):
     """
 
     xc = []
-    if thresholds is None:
+    if masks is None:
         if verbose:
             print('Cross correlating all events')
-        xc = x_correlation(abs_time[not_l(mask)], abs_time[mask], r)
+        xc = x_correlation(
+            abs_time[not_l(detection_mask)], abs_time[detection_mask], r
+        )
     else:
-        for t in range(len(thresholds)):
+        m = masks.shape[0]
+        for t in range(m):
             if verbose:
-                if t == 0:
-                    print('Cross correlating Noise partition')
-                elif t == len(thresholds)-1:
-                    print('Cross correlating {}+ photon partition'.format(t))
-                else:
-                    print('Cross correlating {} photon partition'.format(t))
-            if t == len(thresholds)-1:
+                print('Cross correlating mask {} of {}'.format(t+1, m))
+
                 xc.append(
                     x_correlation(
-                        abs_time[not_l(mask)],
-                        abs_time[mask][data > thresholds[t]],
-                        r
-                    )
-                )
-            else:
-                xc.append(
-                    x_correlation(
-                        abs_time[not_l(mask)],
-                        abs_time[mask][
-                            and_b(
-                                data > thresholds[t],
-                                data <= thresholds[t + 1]
-                            )
-                        ],
+                        abs_time[not_l(detection_mask)],
+                        abs_time[detection_mask][masks[t]],
                         r
                     )
                 )
 
-    return xc
+    return np.array(xc)
 
 
 @jit
@@ -835,7 +900,8 @@ Counts = namedtuple(
 
 
 def count(
-        data, measurement_model, vacuum=False, coinc_mask=None, herald_mask=None
+        data, measurement_model, vacuum=False, coinc_mask=None,
+        herald_mask=None, has_noise_threshold=False
 ):
     """
 
@@ -910,13 +976,17 @@ def count(
     # counting vacuum
     # uncorrelated heralds + correlated data <= the first threshold
     if vacuum:
-        counts[0] = (
-                len((not_l(coinc_mask)[herald_mask]).nonzero()[0]) +
-                len(
-                    (data[coinc_mask[data_mask]] <=
-                     measurement_model.thresholds[1]).nonzero()[0]
-                )
-        )
+        vacuum_counts = len((not_l(coinc_mask)[herald_mask]).nonzero()[0])
+        if has_noise_threshold:
+            vacuum_counts += len(
+                (
+                    data[coinc_mask[data_mask]] <=
+                    measurement_model.thresholds[1]
+                ).nonzero()[0]
+            )
+            counts[0] = vacuum_counts
+        else:
+            counts.insert(0, vacuum_counts)
 
     return Counts(np.array(counts), np.array(noise), vacuum)
 
