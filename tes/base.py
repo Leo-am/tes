@@ -8,12 +8,16 @@ _logger = logging.getLogger(__name__)
 class VhdlEnum(int, Enum):
     def __str__(self):
         return self.name.replace("_", " ")
+        # return self.name
 
     def __repr__(self):
         return self.name
 
     def select(self):
         return pow(2, self.value)
+
+    def latex(self):
+        return self.name.replace("_", "\\_")
 
 
 class TraceType(VhdlEnum):
@@ -40,7 +44,7 @@ class Height(VhdlEnum):
     """
     Value of the event.height register.
     """
-    peak_height = 0
+    rise_height = 0
     cfd_high = 1
     cfd_height = 2
     slope_max = 3

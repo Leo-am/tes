@@ -403,7 +403,7 @@ class CaptureData:
 
     def _extract_samples(self):
         """
-        Extract samples from non a homogeneous dataset.
+        Extract samples from a non homogeneous dataset.
         :return: ndarray of samples
         :notes: Assumes that all traces in the data set are the same shape.
         """
