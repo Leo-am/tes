@@ -978,9 +978,11 @@ def window(i, abs_time, low, high):
         while (low_o + i < length) and abs_time[i + low_o] < low_t: low_o += 1;
 
     if high_t < now:
-        while (i + high_o >= 0) and abs_time[i + high_o] > high_t: high_o -= 1;
+        while (i + high_o >= 0) and abs_time[i + high_o] > high_t:
+            high_o -= 1
     else:
-        while (high_o + i < length) and abs_time[i + high_o] <= high_t: high_o += 1;
+        while (high_o + i < length) and abs_time[i + high_o] <= high_t:
+            high_o += 1
     return low_o, high_o  # offset indexs marking abs_times in the window
 
 
@@ -1343,6 +1345,7 @@ def displaced_thermal(max_photon_number, nbar, alpha, N=200):
 
     return truncated_state #/np.sum(truncated_state)
 
+
 def displaced_vacuum(max_photon_number, alpha, N=200):
     # n [low, high]
     t = qt.thermal_dm(N, 0)
@@ -1357,6 +1360,7 @@ def displaced_vacuum(max_photon_number, alpha, N=200):
     truncated_state = resize_vector(np.real(state), max_photon_number)
 
     return truncated_state #/np.sum(truncated_state)
+
 
 def outcome_probabilities(state, povm, max_photon_number):
 
