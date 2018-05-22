@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 
-from distutils.core import setup
+from setuptools import setup, find_packages
 
 setup(
     name='tes',
     version='0.1.0',
-    description="Package for communicating with the FPGA "
+    description="Package for communicating with the hardware processor "
                 "connected to Transition Edge Sensors",
     author='Geoff Gillett',
     url='http://www.quantum.info',
