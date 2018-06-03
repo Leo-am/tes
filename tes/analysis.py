@@ -722,7 +722,7 @@ def plot_mixture_model(
     if model.has_noise_threshold:
         thresh = thresh[1:]
 
-    print(thresh)
+    # print(thresh)
 
     for t in thresh:
         ax.axvline(
@@ -748,18 +748,6 @@ def plot_mixture_model(
                 label = '{} photon distribution'
 
             legend_labels.append(label.format(p))
-            # if normalised and counts is not None:
-            #     if t == len(pdf_handles)-1:
-            #         legend_labels.append(
-            #             '{} {:,}'.format(label.format(p),
-            #             np.sum(counts.count[t:]))
-            #         )
-            #     else:
-            #         legend_labels.append(
-            #             '{} {:,}'.format(label.format(p), counts.count[t])
-            #         )
-            # else:
-            #     legend_labels.append(label.format(p))
 
     if not normalised:
         legend_handles = pdf_handles + [model_handle]
@@ -799,17 +787,12 @@ def plot_mixture_model(
     tick_values = ytvalues/10**exp
     tick_labels = [r'${:1.1f}$'.format(tick) for tick in tick_values]
     ax.set_yticklabels(tick_labels)
-    # ax.set_ylabel(
-    #     r'{} measurement $(\times 10^{{ {} }})$'
-    #     .format(measurement_name, exp)
-    # )
+
     if normalised:
         ax.set_ylabel(r'probability $(\times 10^{{ {} }})$'.format(exp))
     else:
         ax.set_ylabel(r'count $(\times 10^{{ {} }})$'.format(exp))
 
-    # fmtr = mpl.ticker.StrMethodFormatter(r'${x:1.1}$')
-    # ax.yaxis.set_major_formatter(fmtr)
 
     return fig, legend_handles, legend_labels, bin_centers, mhist, hist
 
@@ -1142,10 +1125,11 @@ def count(
 
 
 Povm = namedtuple(
-    'povm', 'elements vacuum has_noise_threshold'
+    'povm', 'elements vacuum'
 )
 
 
+# FIXME remove counts
 def povm_elements(measurement_model, counts):
     """
     estimate the elements of the system povm from the measurement model and the
