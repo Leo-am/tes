@@ -3,49 +3,48 @@ from .base import VhdlEnum
 
 
 class Value(VhdlEnum):
-    zero = 0
-    filtered_signal = 1
-    filtered_area = 2
-    filtered_extrema = 3
-    slope_signal = 4
-    slope_area = 5
-    slope_extrema = 6
-    raw_signal = 7
-    raw_area = 8
-    raw_extrema = 9
-    pulse_area = 10
-    pulse_length = 11
-    rise_time = 12
+    diabled = 0
+    f = 1
+    f_area = 2
+    f_extrema = 3
+    s = 4
+    s_area = 5
+    s_extrema = 6
+    pulse_area = 7
+    raw = 8
+    cfd_high = 9
+    pulse_timer = 10
+    rise_timer = 11
 
 
 class Trigger(VhdlEnum):
     disabled = 0
     clock = 1
-    pulse_threshold_rising = 2
-    pulse_threshold_falling = 3
-    filtered_zero = 4
-    slope_zero = 5
-    raw_zero = 6
-    slope_threshold_rising = 7
-    cfd_high_rising = 8
-    cfd_low_rising = 9
-    max_slope = 10
-    slope_zero_rising = 11
-    slope_zero_falling = 12
+    pulse_t_pos = 2
+    pulse_t_neg = 3
+    slope_t_pos = 4
+    f_0xing = 5
+    s_0xing = 6
+    s_0xing_pos = 7
+    s_0xing_neg = 8
+    cfd_high = 9
+    cfd_low = 10
+    max_slope = 11
 
 
 class Qualifier(VhdlEnum):
     disabled = 0
     all = 1
-    valid_peak = 2
+    valid_rise = 2
     above_area = 3
-    above_pulse = 4
-    will_go_above_pulse = 5
+    above = 4
+    will_cross = 5
     armed = 6
     will_arm = 7
-    valid_peak0 = 8
+    rise = 8
     valid_peak1 = 9
     valid_peak2 = 10
+    valid_peak3 = 11
 
 
 header_dt = np.dtype([

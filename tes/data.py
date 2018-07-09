@@ -219,7 +219,7 @@ class CaptureData:
         if not os.path.isdir(path):
             raise AttributeError('{} is not a directory'.format(path))
 
-        self.path=path
+        self.path = path
 
         # memmap the files from the capture server
         self.edat = _memmap_data(path, 'edat', dtype=np.uint8)
@@ -412,6 +412,8 @@ class CaptureData:
         for r in range(len(self.ridx)):
             samples[r, :] = self._trace(self.ridx[r])['samples']
         return samples
+
+
 
     def _retime(self):
         """

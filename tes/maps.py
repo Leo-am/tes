@@ -854,7 +854,7 @@ baseline_map = OrderedDict([
         type:bool
         """
      )),
-    ('subtraction',
+    ('dynamic',
      RegInfo(
         0x00000400, (0x00000002, 1), False, bool, None, True,
         doc="""
@@ -945,7 +945,7 @@ event_map = OrderedDict([
         type:tes.base.Height, input can be enum name or value.
         """
      )),
-    ('trace_type',
+    ('trace',
      RegInfo(
          0x00000001, (0x00003000, 12), False, TraceType, trace_type_lookup,
          True,
@@ -956,7 +956,7 @@ event_map = OrderedDict([
         type:tes.base.TraceType, input can be enum name or value.
         """
      )),
-    ('trace_signal',
+    ('trace_sequence',
      RegInfo(
          0x00000001, (0x00000C00, 10), False, Signal, signal_lookup, True,
          doc="""

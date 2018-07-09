@@ -176,7 +176,7 @@ def scaled_pdf(x, params, dist=stats.gamma):
 
 class MixtureModel(
     namedtuple(
-        'MixtureModel', 'param_list thresholds zero_loc log_likelihood '
+        'MixtureModel', 'param_list thresholds log_likelihood '
         'converged dist has_noise_threshold'
      )
 ):
@@ -211,7 +211,7 @@ class MixtureModel(
             filename,
             param_list=self.param_list,
             thresholds=self.thresholds,
-            zero_loc=self.zero_loc,
+            # zero_loc=self.zero_loc,
             log_likelihood=self.log_likelihood,
             converged=self.converged,
             dist=self.dist.name,
@@ -230,7 +230,7 @@ class MixtureModel(
         return MixtureModel(
             d['param_list'],
             d['thresholds'],
-            d['zero_loc'][()],
+            # d['zero_loc'][()],
             d['log_likelihood'][()],
             d['converged'][()],
             getattr(stats, str(d['dist'])),
@@ -346,10 +346,10 @@ def expectation_maximisation(
 
     """
     # trim data
-    if has_noise_threshold:
-        fix_noise = initial_thresholds[1]
-    else:
-        fix_noise = None
+    # if has_noise_threshold:
+    #     fix_noise = initial_thresholds[1]
+    # else:
+    fix_noise = None
 
     fit_data = data[
         and_l(data > initial_thresholds[0], data <= initial_thresholds[-1])
@@ -368,13 +368,13 @@ def expectation_maximisation(
 
     param_list = hard_maximisation(
         fit_data, thresholds, dist=dist,
-        has_noise_threshold=has_noise_threshold
+        # has_noise_threshold=has_noise_threshold
     )
     # return param_list
     if verbose:
         print('Iteration:{} expectation '.format(i))
     new_thresh = hard_expectation(
-        param_list,  fix_noise=fix_noise, dist=dist, normalise=False
+        param_list, dist=dist, normalise=False
     )
 
     new_thresh.append(initial_thresholds[-1])
@@ -395,17 +395,17 @@ def expectation_maximisation(
         if verbose:
             print('Iteration:{} maximisation'.format(i))
         new_param_list = hard_maximisation(
-            fit_data, thresholds, dist=dist,
-            has_noise_threshold=has_noise_threshold
+            fit_data, thresholds, dist=dist #,
+            #has_noise_threshold=has_noise_threshold
         )
         if verbose:
             print('Iteration:{} expectation '.format(i))
         new_thresh = hard_expectation(
-            new_param_list, fix_noise=fix_noise, dist=dist, normalise=False
+            new_param_list, dist=dist, normalise=False
         )
         new_thresh.append(initial_thresholds[-1])
         new_ll = mixture_model_ll(
-            fit_data, new_param_list, has_noise_threshold=has_noise_threshold,
+            fit_data, new_param_list, #has_noise_threshold=has_noise_threshold,
             dist=dist
         )
         if verbose:
@@ -434,7 +434,7 @@ def expectation_maximisation(
 
     # calculate the normalised thresholds
     thresholds = hard_expectation(
-        param_list, fix_noise=fix_noise, normalise=True, dist=dist
+        param_list, normalise=True, dist=dist
     )
     # add the terminal threshold which is never fitted but marks the end of the
     # data that was used in fitting the model
@@ -443,13 +443,15 @@ def expectation_maximisation(
     # calculate the threshold masks
 
     return MixtureModel(
-        np.array(param_list), np.array(thresholds), fix_noise, ll, converged,
+        np.array(param_list), np.array(thresholds), ll, converged,
         dist, has_noise_threshold
     )
 
 
 def hard_expectation(
-        param_list, fix_noise=None, normalise=False, dist=stats.gamma
+        param_list,
+        # fix_noise=None,
+        normalise=False, dist=stats.gamma
 ):
     """
     Calculate the thresholds for a mixture model that define the data
@@ -464,14 +466,15 @@ def hard_expectation(
     :return: ndarray of threshold values.
     """
 
-    if fix_noise is None:
-        t = [0]
-        start = 1
-    else:
-        t = [0, fix_noise]
-        start = 2
-
-    for m in range(start, len(param_list)):
+    # if fix_noise is None:
+    #     t = [0]
+    #     start = 1
+    # else:
+    #     t = [0, fix_noise]
+    #     start = 2
+    t = [0]
+    # for m in range(start, len(param_list)):
+    for m in range(1, len(param_list)):
         left = param_list[m - 1]
         right = param_list[m]
 
@@ -489,8 +492,8 @@ def hard_expectation(
 
 
 def hard_maximisation(
-        data, thresholds, dist=stats.gamma, verbose=True,
-        has_noise_threshold=False
+        data, thresholds, dist=stats.gamma, verbose=True
+        #has_noise_threshold=False
 ):
     """
     Fit distributions to the data partitioned by thresholds.
@@ -507,10 +510,10 @@ def hard_maximisation(
         part = partition(data, thresholds, i)
         print('{}: {}'.format(i, len(part)))
         if len(part) != 0:
-            if has_noise_threshold and i == 1:
-                fit = dist.fit(part, floc=0)
-            else:
-                fit = dist.fit(part)
+            # if has_noise_threshold and i == 1:
+            #     fit = dist.fit(part, floc=0)
+            # else:
+            fit = dist.fit(part)
             if verbose:
                 print('{} distribution:{} params:{}'.format(dist.name, i, fit))
         else:
@@ -523,7 +526,9 @@ def hard_maximisation(
 
 
 def mixture_model_ll(
-        data, param_list, has_noise_threshold=False, dist=stats.gamma
+        data, param_list,
+        # has_noise_threshold=False,
+        dist=stats.gamma
 ):
     """
     Calculate the log likelihood of a mixture model.
@@ -568,7 +573,7 @@ def partition(data, thresholds, i):
 
 
 def plot_mixture_model(
-    model, vacuum=False, data=None, counts=None, xrange=None, normalised=False,
+    model, data=None, counts=None, xrange=None, normalised=False,
     bins=500, bar=False, measurement_name=r'\texttt{area}', last_threshold=None,
     figsize=None
 ):
@@ -587,8 +592,8 @@ def plot_mixture_model(
     """
 
     points = 10000  # number of x points for plotting pdfs
-
-    data_len = len(data)
+    if data is not None:
+        data_len = len(data)
     if data is None and xrange is None:
         raise AttributeError('Either data or x must be supplied')
 
@@ -614,7 +619,7 @@ def plot_mixture_model(
         bin_centers = edges[:-1]+w/2
         x = np.linspace(edges[0], edges[-1], points)
 
-        max_p = max(hist)
+        # max_p = max(hist)
         # s = sum(hist) * w
         s = data_len * w
         if not normalised:
@@ -686,7 +691,10 @@ def plot_mixture_model(
 
     # if data is None or normalised:
     #     ax.set_xlim([-10, max(data)])
-    max_p = np.max(np.max(pdfs))
+    if model.has_noise_threshold:
+        max_p = np.max(np.max(pdfs[1:]))
+    else:
+        max_p = np.max(np.max(pdfs))
 
     if data is None:
         ax.set_xlim([-10, max(x)])
@@ -702,40 +710,46 @@ def plot_mixture_model(
         model_handle, = ax.plot(x, np.sum(pdfs, 0), 'k', lw=1, label='model')
 
     if not normalised:
-        # FIXME fix_noise??
-        if model.has_noise_threshold:
-            fix_noise = model.thresholds[1]
-        else:
-            fix_noise = None
-        thresh = np.array(
-            hard_expectation(
-                model.param_list, fix_noise=fix_noise, normalise=False,
-                dist=model.dist
-            )
+        # # FIXME fix_noise??
+        # if model.has_noise_threshold:
+        #     fix_noise = model.thresholds[1]
+        # else:
+        #     fix_noise = None
+        thresh = np.zeros(len(model.thresholds))
+        thresh[:-1] = hard_expectation(
+            model.param_list, normalise=False, dist=model.dist
         )
+        thresh[-1] = model.thresholds[-1]
     else:
         thresh = model.thresholds
 
-    if last_threshold is not None:
-        thresh = thresh[:last_threshold+1]
+    # if last_threshold is not None:
+    #     thresh = thresh[:last_threshold+1]
 
-    if model.has_noise_threshold:
-        thresh = thresh[1:]
+    # if model.has_noise_threshold:
+    #     thresh = thresh[1:]
 
     # print(thresh)
 
-    for t in thresh:
+    for t in thresh[:-1]:
         ax.axvline(
             t, color='k', linestyle='--', lw=0.5, label='thr{}'.format(t)
+        )
+
+    if not normalised:
+        ax.axvline(
+            thresh[-1], color='k', linestyle='-', lw=1, label='thr{}'.format(t)
         )
         # ax.plot([t, t], [0, max_p], ':k', lw=1)
 
     legend_labels = []
     if data is not None:
         for t in range(len(pdf_handles)):
-            if not vacuum:
+            if model.has_noise_threshold:
+                p = t
+            else:
                 p = t+1
-            if t == 0 and vacuum:
+            if t == 0 and model.has_noise_threshold:
                 label = 'noise'
             elif t == len(pdf_handles)-1:
                 # print('there')
@@ -861,8 +875,8 @@ def x_correlation(s1, s2, r):
 
 @jit
 def drive_correlation(
-    data, model, abs_time, detection_mask, r, last_threshold=-1, masks=None,
-        verbose=False
+    data, model, abs_time, detection_mask, r, last_threshold=-1,
+    verbose=False
 ):
     """
     Calculate the temporal cross-correlation between a channel measuring a
@@ -1130,89 +1144,89 @@ Povm = namedtuple(
 
 
 # FIXME remove counts
-def povm_elements(measurement_model, counts):
-    """
-    estimate the elements of the system povm from the measurement model and the
-    counting data.
-
-    :param array like data: measurement data.
-    :param mixturemodel measurement_model: model created using
-                                           expectation_maximisation.
-    :param Counts counts: the count data returned by count().
-    :return: (elements count vacuum). where counts is a ndarray with
-             shape (len(n)) containing the count for each measurement outcome
-             in n. elements is a ndarray with
-             shape(len(n), len(measurement_model.thresholds)) the first index is
-             the fock state, the second is the outcome. The contents of elements
-             is the probability of the outcome when measuring fock state.
-
-    :notes: POVM elements is indexed by (fock state, measurement outcome).
-            The last threshold in the measurement model marks the boundary of
-            the data that was used to create the model, it is *not* altered by
-            the expectation maximisation algorithm and is essentially a guess.
-            The second last threshold is the boundary of the overflow bin,
-            this last photon number bin is counts detections of >=
-            len(measurement_model.param_list)-2 photons.
-            TODO expand and clarify description.
-    """
-
-    # t thresholds
-    # t-1 distributions
-    # t+1 counts if vacuum else t count[-1] is overflow past last threshold
-
-
-    num_elements = len(counts.count)
-    # cumulative density functions at the thresholds, the last value is not used
-    # normalise to a convex mixture excluding the noise distribution.
-    cdfs = measurement_model.cdf(measurement_model.thresholds)
-
-    elems = cdfs[:, 1:] - cdfs[:, :-1]
-    # Adjust the first elements, which should not have a proceeding threshold.
-    elems[:, 0] = cdfs[:, 1]
-
-    # Adjust the last elements to account for the truncation at the last
-    # threshold (limit of data used to create the model).
-    elems[:, -1] = 1 - cdfs[:, -2]
-
-    # elements should always have a vacuum term.
-    elements = np.zeros((num_elements, num_elements))
-
-    # the majority of the POVM elements are given by the difference in the CDFs
-    # at the threshold values
-
-    if counts.vacuum:
-        if measurement_model.has_noise_threshold:
-            elements = elems
-        else:
-            elements[1:, 1:] = elems
-    else:
-        elements = elems
-
-    # vacuum terms
-    # FIXME check this is correct when has_noise_threshold
-    if counts.vacuum:
-        # probability of counting vacuum when there is a vacuum input
-        # TODO is it appropriate to do same for m > 1 ??
-        for m in range(1, 2):  # range(1, len(counts.uncorrelated)):
-            elements[0, 0] = (
-                    (counts.count[0]-counts.uncorrelated[m])/counts.count[0]
-            )
-            elements[0, m] = counts.uncorrelated[m]/counts.count[0]
-
-         # elements[m, 0] = correlatedsingle/single
-
-        if measurement_model.has_noise_threshold:
-            # look for uncrrelated ???
-            pass
-
-    else:
-        elements[0, 0] = 1
-        elements[0, 1] = 0
-
-    # c = np.array(counts.count[:-1])
-    # c[-1] += counts.count[-1]
-
-    return Povm(elements, counts.vacuum, counts.has_noise_threshold)
+# def povm_elements(measurement_model, counts):
+#     """
+#     estimate the elements of the system povm from the measurement model and the
+#     counting data.
+#
+#     :param array like data: measurement data.
+#     :param mixturemodel measurement_model: model created using
+#                                            expectation_maximisation.
+#     :param Counts counts: the count data returned by count().
+#     :return: (elements count vacuum). where counts is a ndarray with
+#              shape (len(n)) containing the count for each measurement outcome
+#              in n. elements is a ndarray with
+#              shape(len(n), len(measurement_model.thresholds)) the first index is
+#              the fock state, the second is the outcome. The contents of elements
+#              is the probability of the outcome when measuring fock state.
+#
+#     :notes: POVM elements is indexed by (fock state, measurement outcome).
+#             The last threshold in the measurement model marks the boundary of
+#             the data that was used to create the model, it is *not* altered by
+#             the expectation maximisation algorithm and is essentially a guess.
+#             The second last threshold is the boundary of the overflow bin,
+#             this last photon number bin is counts detections of >=
+#             len(measurement_model.param_list)-2 photons.
+#             TODO expand and clarify description.
+#     """
+#
+#     # t thresholds
+#     # t-1 distributions
+#     # t+1 counts if vacuum else t count[-1] is overflow past last threshold
+#
+#
+#     num_elements = len(counts.count)
+#     # cumulative density functions at the thresholds, the last value is not used
+#     # normalise to a convex mixture excluding the noise distribution.
+#     cdfs = measurement_model.cdf(measurement_model.thresholds)
+#
+#     elems = cdfs[:, 1:] - cdfs[:, :-1]
+#     # Adjust the first elements, which should not have a proceeding threshold.
+#     elems[:, 0] = cdfs[:, 1]
+#
+#     # Adjust the last elements to account for the truncation at the last
+#     # threshold (limit of data used to create the model).
+#     elems[:, -1] = 1 - cdfs[:, -2]
+#
+#     # elements should always have a vacuum term.
+#     elements = np.zeros((num_elements, num_elements))
+#
+#     # the majority of the POVM elements are given by the difference in the CDFs
+#     # at the threshold values
+#
+#     if counts.vacuum:
+#         if measurement_model.has_noise_threshold:
+#             elements = elems
+#         else:
+#             elements[1:, 1:] = elems
+#     else:
+#         elements = elems
+#
+#     # vacuum terms
+#     # FIXME check this is correct when has_noise_threshold
+#     if counts.vacuum:
+#         # probability of counting vacuum when there is a vacuum input
+#         # TODO is it appropriate to do same for m > 1 ??
+#         for m in range(1, 2):  # range(1, len(counts.uncorrelated)):
+#             elements[0, 0] = (
+#                     (counts.count[0]-counts.uncorrelated[m])/counts.count[0]
+#             )
+#             elements[0, m] = counts.uncorrelated[m]/counts.count[0]
+#
+#          # elements[m, 0] = correlatedsingle/single
+#
+#         if measurement_model.has_noise_threshold:
+#             # look for uncrrelated ???
+#             pass
+#
+#     else:
+#         elements[0, 0] = 1
+#         elements[0, 1] = 0
+#
+#     # c = np.array(counts.count[:-1])
+#     # c[-1] += counts.count[-1]
+#
+#     return Povm(elements, counts.vacuum, counts.has_noise_threshold)
 
 
 def fit_state_least_squares(
@@ -1497,4 +1511,221 @@ def plot_state_fit(nbar, alpha, counts, povm=None, figsize=None):
     #     transform=ax.transAxes, horizontalalignment='left'
     # )
     ax.legend(frameon=False)
+    return fig
+
+
+def povm_elements(model):
+    cdfs = model.cdf(model.thresholds)
+    elems = np.zeros((cdfs.shape[0]+1, cdfs.shape[1]))
+    elems[1:, 1:] = cdfs[:, 1:] - cdfs[:, :-1]
+    elems[1:, 0] = cdfs[:, 0]
+    elems[1:, -1] = 1-cdfs[:, -2]
+    elems[0, 0] = 1
+    return elems
+
+
+def model_outcomes(x, N, thermal=False, povm=None, qtN=100):
+    """
+    Model the measurement outcome probabilities assuming the input is a
+    displaced thermal state.
+
+    :param x iterable: The state parameters
+    :param N int: Dimension of the Fock space, max photon number is N-1
+    :param thermal: When True model input as displaced thermal state otherwise
+                    model as coherent state (displaced thermal).
+    :param povm: The detector povm
+    :param qtN: The dimension of the Fock space to use for qutip models.
+    """
+    #     print(x)
+    D = qt.displace(qtN, x[0])
+    if thermal:
+        #         print('thermal')
+        t = qt.thermal_dm(qtN, x[1])
+    else:
+        t = qt.thermal_dm(qtN, 0)
+
+    s = D * t * D.dag()
+
+    state = np.real(np.array([
+        (qt.states.fock(qtN, n) * qt.states.fock(qtN, n).dag() * s).tr()
+        for n in np.arange(0, qtN)
+    ]))
+    #     print(np.sum(state))
+    if povm is not None:
+        n_ele = povm.shape[1]  # number of povm elements
+        if N > n_ele:
+            raise AttributeError(
+                'N must be less than or equal to the number of POVM elements'
+            )
+        o = np.sum(state[:n_ele] * povm.transpose(), 1)  #
+        o[-1] += np.sum(state[n_ele:])  # truncate to number of elements
+        if N < n_ele:  # truncate to N if necessary
+            ot = np.array(o[:N], copy=True)
+            ot[-1] += np.sum(o[N:])
+            o = ot
+    else:
+        o = np.array(state[:N], copy=True)
+        o[-1] += np.sum(state[N:])
+    return o
+
+
+def fit_input_ls(
+        counts, N, povm=None, thermal=False, qtN=150
+):
+    def dt_model(N, alpha, nbar):
+        if thermal:
+            x = [alpha, nbar]
+        else:
+            x = [alpha]
+
+        o = model_outcomes(x, N, thermal=thermal, povm=povm, qtN=qtN)
+
+        return o * total
+
+    if N > len(counts):
+        raise AttributeError('N cannot be greater than the number of counts')
+    if N < len(counts):
+        c = np.array(counts[:N], copy=True)
+        c[-1] += np.sum(counts[N:])
+        counts = c
+
+    model = Model(dt_model, nan_policy='omit')
+
+    pars = model.make_params(nbar=0.1, alpha=1.0)
+    pars['nbar'].set(min=0, max=0.5)
+    pars['alpha'].set(min=0, max=10)
+    pars['nbar'].set(vary=thermal)
+
+    if not thermal:
+        pars['nbar'].set(value=0.0)
+
+    total = np.sum(counts)
+    return model.fit(
+        counts, pars, N=N, weights=np.sqrt(1.0 / counts)
+    )
+
+
+def xcor_plot(xc, r, has_noise_threshold=False, figsize=None):
+
+    if figsize is not None:
+        fig = plt.figure(figsize=figsize)
+    else:
+        fig = plt.figure()
+
+    ax = fig.add_axes([0.12, 0.12, 0.85, 0.85])
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+
+    sxc = np.sum(xc, 0)
+
+    ax.bar(
+        r[sxc != 0] * 4, sxc[sxc != 0], 4,
+        align='center',
+        facecolor=(0.01, 0.01, 0.01, 0.1),
+        edgecolor=(0, 0, 0, 0.5),
+        lw=0.5, label=r'Total'
+    )
+
+    if xc.shape[0] > 1:
+        for x in range(xc.shape[0] - 1):
+            r_nz = r[xc[x] != 0] * 4
+            xc_nz = xc[x][xc[x] != 0]
+            if has_noise_threshold:
+                p = x
+            else:
+                p = x + 1
+            if x == 0 and has_noise_threshold:
+                label = 'noise'
+            elif x == xc.shape[0] - 2:
+                r_nz = r[np.sum(xc[x:]) != 0] * 4
+                xc_nz = np.sum(xc[x:])[np.sum(xc[x:]) != 0]
+                label = '{}+ photons'.format(p)
+            elif p == 1:
+                label = '{} photon'.format(p)
+            else:
+                label = '{} photons'.format(p)
+            ax.plot(
+                r[xc[x] != 0] * 4, xc[x][xc[x] != 0], '-', markersize=5,
+                markerfacecolor='none', mew=0.5, label=label, lw=1
+            )
+
+    ax.set_xlabel(r'detection time relative to herald (ns)')
+    ax.set_ylabel(r'count')
+    #     ax.set_xlim([200,800])
+    ax.frameon = False
+    fig.legend(
+        bbox_to_anchor=(0.33, 0.98), bbox_transform=fig.transFigure,
+        frameon=False
+    )
+    return fig
+
+
+def plot_ls_state(r, counts, N, thermal=False, figsize=None):
+    if figsize is not None:
+        fig = plt.figure(figsize=figsize)
+    else:
+        fig = plt.figure()
+
+    width = 0.48  # the width of the bars
+    ax = fig.add_axes([0.12, 0.12, 0.84, 0.83])
+    n = np.arange(0, r.ndata)
+    #     print(len(counts))
+    if N > len(counts):
+        raise AttributeError('N cannot be greater than len(counts)')
+    if N < len(counts):
+        c = np.array(counts[:N], copy=True)
+        c[-1] += np.sum(counts[N:])
+    else:
+        c = counts
+
+    #     print(n[0],len(n),len(c))
+    rects1 = ax.bar(n - width / 2, c, width, color='r')
+    rects2 = ax.bar(n + width / 2, r.best_fit, width, color='b'
+                    )
+    #     chi2=sum(np.power(counts-r.best_fit,2)/model_counts)
+    ax.set_ylabel('count')
+    ax.set_xlabel('Fock state')
+    ax.set_xticks(n)
+    xlabels = [r'$\vert {} \rangle$'.format(p) for p in n]
+    xlabels[-1] = r'$\vert {}\rangle{}$'.format(n[-1], '+')
+    ax.set_xticklabels(xlabels)
+
+    ax.legend((rects1[0], rects2[0]), ('data', 'model'), frameon=False)
+    # plt.plot(n,nc,'.')
+    # plt.plot(n,r.best_fit,'o',markerfacecolor='none')
+    # ax.set_ylim(0,11000000)
+    ty = 0.8
+    tx = 0.7
+    ls = 0.05
+    if thermal:
+        ax.text(tx, ty, r'Displaced thermal state', transform=ax.transAxes)
+    else:
+        ax.text(tx, ty, r'Coherent state', transform=ax.transAxes)
+    ax.text(
+        tx, ty - ls, r'$\alpha={:.4f}\pm{:.4f}$'
+            .format(
+            r.params['alpha'].value, r.params['alpha'].stderr
+        ),
+        transform=ax.transAxes, horizontalalignment='left'
+    )
+    if thermal:
+        ax.text(
+            tx, ty - 2 * ls, r'${}={:.4f}\pm{:.4f}$'
+                .format(
+                r'\bar{n}', r.params['nbar'].value, r.params['nbar'].stderr
+            ),
+            transform=ax.transAxes, horizontalalignment='left'
+        )
+    ax.text(
+        tx, ty - 3 * ls, r'$\chi^2/{}={:.3f}$'
+            .format(
+            r.ndata - r.nvarys - 1, r.chisqr / (r.ndata - r.nvarys - 1)
+        ),
+        transform=ax.transAxes, horizontalalignment='left'
+    )
+    ax.legend(
+        (rects1[0], rects2[0]), ('model', 'data'),
+        bbox_to_anchor=(tx, ty - 0.34), loc='lower left',
+        frameon=False
+    )
     return fig

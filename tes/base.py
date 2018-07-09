@@ -36,18 +36,18 @@ class Signal(VhdlEnum):
     """
     none = 0
     raw = 1
-    filtered = 2
-    slope = 3
+    f = 2
+    s = 3
 
 
 class Height(VhdlEnum):
     """
     Value of the event.height register.
     """
-    rise_height = 0
+    peak = 0
     cfd_high = 1
     cfd_height = 2
-    slope_max = 3
+    max_slope = 3
 
 
 class Timing(VhdlEnum):
