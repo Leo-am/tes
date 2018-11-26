@@ -12,8 +12,9 @@ setup(
     author_email='geoff.gillett@gmail.com',
     # package_dir={'tes': ''},
     py_modules=[
-        'tes.base', 'tes.maps', 'tes.mca', 'tes.registers', 'tes.analysis'
+        'tes.analysis', 'tes.base', 'tes.data', 'tes.filesets', 'tes.maps', 
+        'tes.mca', 'tes.protocol', 'tes.registers' 
     ],
-    requires=['matplotlib', 'numpy', 'scipy', 'numba', 'qutip', 'lmfit',
-              'pyzmq']
+    requires=['lmfit', 'matplotlib', 'numba', 'numpy', 'pyzmq',  'qutip', 'scipy' 
+              ]
 )
