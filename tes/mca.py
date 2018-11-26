@@ -3,7 +3,7 @@ from .base import VhdlEnum
 
 
 class Value(VhdlEnum):
-    diabled = 0
+    disabled = 0
     f = 1
     f_area = 2
     f_extrema = 3
